@@ -60,11 +60,12 @@ pub async fn first_time(
     // loopback check. This is the recommended posture for any host that is not
     // strictly single-tenant during bootstrap.
     match env::var(FIRST_TIME_TOKEN_ENV) {
-        Ok(expected) if !expected.is_empty() => {
-            if !constant_time_eq(form.token.as_bytes(), expected.as_bytes()) {
-                warn!("rejected first_time request with an invalid bootstrap token");
-                return Ok(forbidden("invalid bootstrap token"));
-            }
+        Ok(expected)
+            if !expected.is_empty()
+                && !constant_time_eq(form.token.as_bytes(), expected.as_bytes()) =>
+        {
+            warn!("rejected first_time request with an invalid bootstrap token");
+            return Ok(forbidden("invalid bootstrap token"));
         }
         _ => {}
     }
