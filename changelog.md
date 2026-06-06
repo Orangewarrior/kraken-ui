@@ -2,7 +2,38 @@
 
 All notable changes to this project are recorded in this file.
 
-## Unreleased
+## 0.4.0 - 2026-06-06
+
+### Security
+
+Mitigations for every finding in `docs/security-review.md`:
+
+- **Login rate limiting and lockout (H-1):** failed logins are now throttled per
+  source IP and per account (5 failures in 5 minutes triggers a 15-minute
+  lockout), closing the online password-guessing window.
+- **Constant-time login (H-2):** an unknown username now triggers a dummy
+  Argon2id verification, so login latency no longer reveals whether an account
+  exists.
+- **Persistent sessions and a stable signing key (M-1):** sessions are stored in
+  SQLite via SeaORM (surviving restarts and allowing central revocation) and the
+  cookie signing key is loaded from `KRAKEN_UI_SESSION_KEY` /
+  `KRAKEN_UI_SESSION_KEY_FILE`.
+- **Re-authentication on password change (M-2):** the change-password form now
+  requires and verifies the current password.
+- **Hardened `first_time` bootstrap (M-3):** requests carrying proxy forwarding
+  headers are rejected, and an optional `KRAKEN_UI_FIRST_TIME_TOKEN` adds a
+  shared-secret check on top of the loopback guard.
+- **No caching of authenticated pages (M-4):** admin responses now send
+  `Cache-Control: no-store`.
+- **Blocking `cargo-audit` (L-1):** the advisory job no longer continues on
+  error.
+- **Authentication audit trail (L-2):** structured `audit`-target log events are
+  emitted for login outcomes, logout, the `first_time` bootstrap and operator
+  create/update/delete/password-change actions (never including secrets).
+- **Explicit WAF trust (L-3):** a warning is logged when `waf-cert-ca` is unset
+  and the UI falls back to its own certificate for the metrics channel.
+- **Escaped search wildcards (L-4):** `%` and `_` in operator/attack searches are
+  escaped and matched literally via `LIKE ... ESCAPE`.
 
 ### Changed
 

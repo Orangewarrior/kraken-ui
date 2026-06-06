@@ -1,11 +1,11 @@
 # Security review
 
 A standing review of Kraken UI's security posture. It records what is done
-well, the gaps that remain, and concrete remediation for each. Severities use a
+well, the gaps that were found, and how each was addressed. Severities use a
 simple High / Medium / Low scale based on exploitability and impact for a
 TLS-only, admin-authenticated console.
 
-_Last reviewed: 2026-06-06._
+_Last reviewed: 2026-06-06. All findings below were mitigated in 0.4.0._
 
 ## What is already strong
 
@@ -31,108 +31,108 @@ The codebase gets the fundamentals right, and that is worth stating plainly:
 
 ### H-1 — No rate limiting or lockout on login _(High)_
 
-`POST /kraken_ui/test_login` has no throttling, lockout or backoff. Argon2id
-("moderate") raises the cost per attempt, but a determined attacker can still
-mount online password-guessing or credential-stuffing attacks. The login page
-itself already warns that rate limiting is a prerequisite for production.
+`POST /kraken_ui/test_login` had no throttling, so Argon2id cost was the only
+brake on online password-guessing and credential stuffing.
 
-**Remediation:** add per-IP and per-account rate limiting (for example a
-`tower_governor` layer), plus temporary lockout / exponential backoff after
-repeated failures. Record failed attempts in the audit log (see L-2).
+**Status: Mitigated in 0.4.0.** `security::rate_limit::LoginThrottle` counts
+failures per source IP *and* per account; reaching the threshold (5 failures in
+5 minutes) locks the key for 15 minutes, and a successful login clears it. A
+locked client receives a generic "too many attempts" message.
+
+**Follow-up:** the throttle is process-local. For a multi-replica deployment,
+back it with a shared store.
 
 ### H-2 — Username enumeration via login timing _(High)_
 
-In `controllers/auth.rs`, when the username is not found the handler returns
-immediately, whereas an existing username triggers a full Argon2id verification.
-The measurable timing difference lets an attacker enumerate valid usernames.
+A missing username returned immediately, whereas an existing one triggered a
+full Argon2id verification — a measurable timing oracle.
 
-**Remediation:** when the user is not found, verify the supplied password
-against a fixed dummy Argon2id record so both paths take comparable time, then
-return the generic "Invalid credentials" response.
+**Status: Mitigated in 0.4.0.** When the username is not found, the handler now
+runs `PasswordCryptoService::run_dummy_verification`, a real Argon2id
+verification against a precomputed throwaway record, so both paths take
+comparable time before returning the generic "Invalid credentials" response.
 
 ### M-1 — In-memory session store and per-restart signing key _(Medium)_
 
-`app.rs` uses `MemoryStore::default()` and `Key::generate()`. Sessions live only
-in process memory and the signing key is regenerated on every start. This is
-fine for a single dev instance but is a problem in production: sessions cannot
-be shared across replicas or survive a restart, and there is no central place
-to revoke a session.
+`MemoryStore` plus `Key::generate()` meant sessions were lost on restart, could
+not be shared across replicas, and could not be revoked centrally.
 
-**Remediation:** for production, back sessions with a shared, persistent store
-and load a stable signing key from the existing key-management mechanism
-(env var or `0600` file) rather than generating one at boot.
+**Status: Mitigated in 0.4.0.** Sessions are now persisted by
+`models::session_store::SeaOrmSessionStore` (SQLite via SeaORM, with expiry
+filtering), so they survive restarts and a row can be deleted to revoke a
+session. The cookie signing key is loaded from `KRAKEN_UI_SESSION_KEY` or
+`KRAKEN_UI_SESSION_KEY_FILE` (Base64, ≥ 64 bytes); if none is set an ephemeral
+key is generated with a clear warning for development only.
 
 ### M-2 — No re-authentication before changing a password _(Medium)_
 
-`update_password_action` correctly restricts a user to their own account, but it
-does not require the current password. If a session is hijacked (for example via
-a stolen cookie), the attacker can set a new password and lock out the owner.
+`update_password_action` did not require the current password, so a hijacked
+session could lock out the owner.
 
-**Remediation:** require and verify the current password before accepting a new
-one.
+**Status: Mitigated in 0.4.0.** The change-password form now has a current
+password field, which is verified against the stored record before the new
+password is accepted.
 
 ### M-3 — `first_time` trust depends on the peer socket address _(Medium)_
 
-The bootstrap endpoint authorises callers solely by `ConnectInfo<SocketAddr>`
-being a loopback address. Behind a reverse proxy that terminates TLS and
-forwards to `127.0.0.1`, every request appears to originate from loopback, so
-the loopback guard is bypassed for as long as the operators table is empty.
+Behind a reverse proxy that forwards to loopback, every request looked local,
+bypassing the loopback guard while the operators table was empty.
 
-**Remediation:** document that the first administrator must be created *before*
-the service is exposed through any proxy; or gate `first_time` behind a
-one-time secret in addition to the loopback check. The existing `count() > 0`
-guard limits the window but does not eliminate it.
+**Status: Mitigated in 0.4.0.** `first_time` now rejects any request carrying
+proxy forwarding headers (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`,
+`X-Forwarded-Host`), and an optional `KRAKEN_UI_FIRST_TIME_TOKEN` adds a
+constant-time shared-secret check on top of the loopback requirement. The
+existing `count() > 0` guard still closes the endpoint after first use.
 
 ### M-4 — Authenticated pages are cacheable _(Medium)_
 
-Neither `conf/headers_sec.txt` nor the responses set `Cache-Control: no-store`.
-Sensitive admin pages (the operators table, attack data) may be cached by the
-browser or shared caches.
+Admin pages (operators, attack data) could be stored by the browser or shared
+caches.
 
-**Remediation:** add `Cache-Control: no-store` (and `Pragma: no-cache`) to
-authenticated responses, or globally in the header middleware.
+**Status: Mitigated in 0.4.0.** The `require_admin` middleware now sets
+`Cache-Control: no-store` on every authenticated response.
 
 ### L-1 — `cargo-audit` is non-blocking in CI _(Low)_
 
-The `cargo-audit` job sets `continue-on-error: true`, so a new advisory will not
-fail the pipeline. Advisory coverage is largely preserved because
-`cargo-deny check advisories` *does* block, but the redundancy is misleading.
+The job used `continue-on-error: true`, so a new advisory did not fail the
+pipeline.
 
-**Remediation:** either make `cargo-audit` blocking, or drop it and rely on
-`cargo-deny` for advisories to avoid a false sense of coverage.
+**Status: Mitigated in 0.4.0.** `continue-on-error` was removed; `cargo audit`
+now blocks, alongside `cargo-deny check advisories`.
 
 ### L-2 — Limited authentication audit trail _(Low)_
 
-Failed logins are only logged (`warn`) when the crypto service itself errors,
-not on an ordinary wrong password. There is no structured, queryable record of
-authentication successes and failures.
+Only crypto-service errors were logged, with no queryable record of normal
+authentication or administrative events.
 
-**Remediation:** emit structured audit events for login success/failure, logout
-and operator CRUD (never including secrets), which also feeds H-1's lockout
-logic.
+**Status: Mitigated in 0.4.0.** Structured events are emitted on the `audit`
+tracing target for login outcomes (success, bad password, unknown user, locked,
+invalid input, crypto error, non-admin), logout, the `first_time` bootstrap and
+operator create/update/delete/password-change. No secrets are included.
 
 ### L-3 — `waf-cert-ca` falls back to the server certificate _(Low)_
 
-When `waf-cert-ca` is unset, `config.waf_certificate_path()` falls back to the
-UI's own `cert-ca`. If the WAF presents a different CA, the metrics client will
-fail to connect — a confusing failure mode rather than a vulnerability.
+When `waf-cert-ca` was unset, the metrics client silently trusted the UI's own
+`cert-ca`, which is a confusing failure mode if the WAF presents a different CA.
 
-**Remediation:** make `waf-cert-ca` explicit (or clearly document the fallback)
-so trust for the metrics channel is always intentional.
+**Status: Mitigated in 0.4.0.** A warning is now logged at start-up when the
+fallback is used, and the behaviour is documented in `docs/operations.md`.
 
 ### L-4 — `LIKE` wildcards in search are not escaped _(Low)_
 
-The operators/attacks search uses SeaORM's `contains`, so user-supplied `%` and
-`_` act as wildcards. This is not SQL injection (values are bound), but it lets
-a user broaden a search unexpectedly.
+`SeaORM::contains` interpolated user-supplied `%` and `_` into the pattern, so a
+search term could act as a wildcard (not injection, but surprising).
 
-**Remediation:** escape `%` and `_` in the search term if exact substring
-matching is intended.
+**Status: Mitigated in 0.4.0.** Both repositories now build the pattern with
+`security::sanitize::escape_like` and a `LIKE ... ESCAPE '\'` clause, so
+metacharacters are matched literally.
 
-## Suggested priority
+## Remaining follow-ups
 
-1. **H-1** and **H-2** — they directly affect the authentication boundary and
-   are the highest-value hardening for an internet-reachable console.
-2. **M-1** and **M-2** — important before any multi-instance or
-   higher-assurance deployment.
-3. **M-3**, **M-4** and the Low-severity items as follow-ups.
+These are intentionally out of scope for 0.4.0 and tracked for later:
+
+- Back the login throttle (H-1) and, optionally, sessions with a shared store
+  for multi-replica deployments.
+- Periodically prune expired rows from the `kraken_sessions` table (expired rows
+  are already ignored on load, but not yet garbage-collected).
+- Consider a CSP `report-to` endpoint to collect violation reports.

@@ -1,6 +1,6 @@
 [package]
 name = "kraken-ui"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 license = "BSD-3-Clause"
 publish = false
@@ -9,6 +9,7 @@ publish = false
 ammonia = "4.1"
 anyhow = "1.0"
 askama = "0.14"
+async-trait = "0.1"
 axum = "0.8.8"
 axum-server = { version = "0.8", features = ["tls-rustls"] }
 axum_csrf = { version = "0.11", features = ["layer"] }
@@ -20,6 +21,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std"] }
 sea-orm = { version = "1.1", default-features = false, features = ["macros", "runtime-tokio-rustls", "sqlx-sqlite"] }
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 serde_yaml = "0.9"
 time = "0.3"
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal"] }

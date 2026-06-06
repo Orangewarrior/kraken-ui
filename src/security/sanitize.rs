@@ -19,6 +19,21 @@ pub fn secret_has_rejected_markup(input: &str) -> bool {
     has_markup_delimiter && plain_text(input) != input
 }
 
+/// Escapes the SQL `LIKE` metacharacters (`\`, `%`, `_`) so a search term is
+/// matched literally. Pair this with a `LIKE ... ESCAPE '\'` clause. Without it,
+/// a user-supplied `%` or `_` would silently act as a wildcard and broaden the
+/// search.
+pub fn escape_like(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for character in input.chars() {
+        if matches!(character, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
+}
+
 #[cfg(test)]
 mod tests {
     use super::{plain_text, secret_has_rejected_markup};
@@ -36,5 +51,11 @@ mod tests {
     #[test]
     fn rejects_markup_in_a_secret() {
         assert!(secret_has_rejected_markup("<b>LongRandomPass9!</b>"));
+    }
+
+    #[test]
+    fn escapes_like_metacharacters() {
+        assert_eq!(super::escape_like("100%_\\x"), "100\\%\\_\\\\x");
+        assert_eq!(super::escape_like("plain"), "plain");
     }
 }

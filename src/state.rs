@@ -5,8 +5,10 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
 
 use crate::{
-    config::AppConfig, security::password::PasswordPolicy,
-    services::password_crypto::PasswordCryptoService, services::waf_metrics::WafMetricsService,
+    config::AppConfig,
+    security::{password::PasswordPolicy, rate_limit::LoginThrottle},
+    services::password_crypto::PasswordCryptoService,
+    services::waf_metrics::WafMetricsService,
 };
 
 #[derive(Clone)]
@@ -18,5 +20,6 @@ pub struct AppState {
     pub password_policy: Arc<dyn PasswordPolicy>,
     pub password_crypto: Arc<dyn PasswordCryptoService>,
     pub waf_metrics: WafMetricsService,
+    pub login_throttle: Arc<LoginThrottle>,
     pub first_time_lock: Arc<Mutex<()>>,
 }
