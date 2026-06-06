@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>{{ product_name }} — Edit User</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body class="auth-page admin-form-page" data-page="acl-form">
+  <main class="auth-shell form-only-shell" aria-labelledby="page-title">
+    <section class="auth-visual" aria-hidden="true">
+      <img class="auth-logo-watermark" src="/static/img/logo-mark.png" width="140" height="140" alt="" decoding="async">
+      <div class="auth-orbit"></div>
+      <div class="auth-gridlines"></div>
+    </section>
+    <section class="auth-card form-card">
+      <a class="brand auth-brand" href="/acl"><img class="brand-mark-img" src="/static/img/logo-mark.png" width="40" height="40" alt="" aria-hidden="true" decoding="async"><span class="brand-text">Kraken<span>Waf</span></span></a>
+
+      <div class="auth-heading"><span class="badge">ACL CRUD</span><h1 id="page-title">Edit <span class="accent">user</span></h1><p class="lead">Update the selected user. Leave password blank to keep the current password.</p></div>
+      <form class="login-form management-form" method="post" action="/acl/users/edit/{{ user_id }}" autocomplete="off" data-password-policy>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="user_id" value="{{ user_id }}">
+        <div class="field-group"><label for="username">Username</label><input id="username" name="username" type="text" autocomplete="username" value="{{ username }}" required minlength="3" maxlength="64" pattern="[A-Za-z0-9_.-]{3,64}" spellcheck="false"></div>
+        <div class="field-group"><label for="email">E-mail</label><input id="email" name="email" type="email" autocomplete="email" value="{{ email }}" required maxlength="254" spellcheck="false"></div>
+        <div class="field-group"><label for="user_type">Type</label><select id="user_type" name="user_type" required>{% for role in roles %}<option value="{{ role.value }}"{% if role.value == user_type %} selected{% endif %}>{{ role.label }}</option>{% endfor %}</select></div>
+        <div class="field-group"><label for="password">New password</label><input id="password" name="password" type="password" autocomplete="new-password" placeholder="Optional strong password" minlength="14" maxlength="256" data-strong-password data-optional-password><div class="password-meter" aria-live="polite"><span data-password-strength>Strength: optional</span></div><ul class="password-rules" data-password-rules><li data-rule="length">At least 14 characters</li><li data-rule="lower">Lowercase letter</li><li data-rule="upper">Uppercase letter</li><li data-rule="digit">Number</li><li data-rule="symbol">Symbol</li><li data-rule="identity">Does not contain username or e-mail</li></ul></div>
+        <button class="cta submit-button" type="submit" data-policy-submit>Submit →</button>
+      </form>
+      <div class="auth-note" role="note"><strong>Backend note:</strong> this template performs client-side validation only for UX. Enforce password policy, CSRF, authorization, and audit logging server-side.</div>
+    </section>
+  </main>
+</body>
+</html>

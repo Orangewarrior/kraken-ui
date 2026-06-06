@@ -1,0 +1,344 @@
+use std::sync::Arc;
+
+use anyhow::Context;
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, Condition, DatabaseConnection, EntityTrait,
+    IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
+};
+
+use crate::{models::operator, services::password_crypto::PasswordCryptoService};
+
+#[derive(Clone)]
+pub struct OperatorRepository {
+    database: DatabaseConnection,
+    password_crypto: Arc<dyn PasswordCryptoService>,
+}
+
+pub struct NewOperator<'a> {
+    pub username: &'a str,
+    pub email: &'a str,
+    pub operator_type: &'a str,
+    pub password: &'a str,
+}
+
+pub struct UpdateOperator<'a> {
+    pub username: &'a str,
+    pub email: &'a str,
+    pub operator_type: &'a str,
+    pub password: Option<&'a str>,
+}
+
+pub struct OperatorPage {
+    pub records_total: u64,
+    pub records_filtered: u64,
+    pub operators: Vec<operator::Model>,
+}
+
+impl OperatorRepository {
+    pub fn new(
+        database: DatabaseConnection,
+        password_crypto: Arc<dyn PasswordCryptoService>,
+    ) -> Self {
+        Self {
+            database,
+            password_crypto,
+        }
+    }
+
+    pub async fn find_by_username(
+        &self,
+        username: &str,
+    ) -> anyhow::Result<Option<operator::Model>> {
+        operator::Entity::find()
+            .filter(operator::Column::Username.eq(username.to_owned()))
+            .one(&self.database)
+            .await
+            .context("failed to query operator by username")
+    }
+
+    pub async fn find_by_id(&self, id_user: i32) -> anyhow::Result<Option<operator::Model>> {
+        operator::Entity::find_by_id(id_user)
+            .one(&self.database)
+            .await
+            .context("failed to query operator by id")
+    }
+
+    pub async fn find_by_email(&self, email: &str) -> anyhow::Result<Option<operator::Model>> {
+        operator::Entity::find()
+            .filter(operator::Column::Email.eq(email.to_owned()))
+            .one(&self.database)
+            .await
+            .context("failed to query operator by email")
+    }
+
+    pub async fn count(&self) -> anyhow::Result<u64> {
+        operator::Entity::find()
+            .count(&self.database)
+            .await
+            .context("failed to count operators")
+    }
+
+    pub async fn create(&self, input: NewOperator<'_>) -> anyhow::Result<operator::Model> {
+        let transaction = self
+            .database
+            .begin()
+            .await
+            .context("failed to start operator creation transaction")?;
+        let timestamp = current_timestamp();
+        let pending_operator = operator::ActiveModel {
+            id_user: NotSet,
+            username: Set(input.username.to_owned()),
+            email: Set(input.email.to_owned()),
+            operator_type: Set(input.operator_type.to_owned()),
+            encrypted_password_hash: Set("transaction-pending".to_owned()),
+            created_at: Set(timestamp.clone()),
+            updated_at: Set(timestamp),
+        }
+        .insert(&transaction)
+        .await
+        .context("failed to insert operator")?;
+
+        let encrypted_password_hash = encrypt_password(
+            self.password_crypto.clone(),
+            pending_operator.id_user,
+            input.password.to_owned(),
+        )
+        .await?;
+        let mut active_operator = pending_operator.into_active_model();
+        active_operator.encrypted_password_hash = Set(encrypted_password_hash);
+        let operator = active_operator
+            .update(&transaction)
+            .await
+            .context("failed to store encrypted operator password")?;
+        transaction
+            .commit()
+            .await
+            .context("failed to commit operator creation")?;
+        Ok(operator)
+    }
+
+    pub async fn update(
+        &self,
+        existing: operator::Model,
+        input: UpdateOperator<'_>,
+    ) -> anyhow::Result<operator::Model> {
+        let user_id = existing.id_user;
+        let mut active_operator = existing.into_active_model();
+        active_operator.username = Set(input.username.to_owned());
+        active_operator.email = Set(input.email.to_owned());
+        active_operator.operator_type = Set(input.operator_type.to_owned());
+        active_operator.updated_at = Set(current_timestamp());
+        if let Some(password) = input.password {
+            active_operator.encrypted_password_hash =
+                Set(
+                    encrypt_password(self.password_crypto.clone(), user_id, password.to_owned())
+                        .await?,
+                );
+        }
+        active_operator
+            .update(&self.database)
+            .await
+            .context("failed to update operator")
+    }
+
+    pub async fn update_encrypted_password(
+        &self,
+        id_user: i32,
+        encrypted_password_hash: String,
+    ) -> anyhow::Result<()> {
+        let Some(operator) = self.find_by_id(id_user).await? else {
+            return Ok(());
+        };
+        let mut active_operator = operator.into_active_model();
+        active_operator.encrypted_password_hash = Set(encrypted_password_hash);
+        active_operator.updated_at = Set(current_timestamp());
+        active_operator
+            .update(&self.database)
+            .await
+            .context("failed to update rehashed password")?;
+        Ok(())
+    }
+
+    pub async fn update_password(
+        &self,
+        existing: operator::Model,
+        password: &str,
+    ) -> anyhow::Result<operator::Model> {
+        let user_id = existing.id_user;
+        let mut active_operator = existing.into_active_model();
+        active_operator.encrypted_password_hash =
+            Set(
+                encrypt_password(self.password_crypto.clone(), user_id, password.to_owned())
+                    .await?,
+            );
+        active_operator.updated_at = Set(current_timestamp());
+        active_operator
+            .update(&self.database)
+            .await
+            .context("failed to update operator password")
+    }
+
+    pub async fn delete_by_id(&self, id_user: i32) -> anyhow::Result<u64> {
+        let result = operator::Entity::delete_by_id(id_user)
+            .exec(&self.database)
+            .await
+            .context("failed to delete operator")?;
+        Ok(result.rows_affected)
+    }
+
+    pub async fn delete_by_email(&self, email: &str) -> anyhow::Result<u64> {
+        let result = operator::Entity::delete_many()
+            .filter(operator::Column::Email.eq(email.to_owned()))
+            .exec(&self.database)
+            .await
+            .context("failed to delete operator by email")?;
+        Ok(result.rows_affected)
+    }
+
+    pub async fn page(
+        &self,
+        start: u64,
+        length: u64,
+        search: &str,
+    ) -> anyhow::Result<OperatorPage> {
+        let records_total = operator::Entity::find()
+            .count(&self.database)
+            .await
+            .context("failed to count operators")?;
+        let mut query = operator::Entity::find();
+        if !search.is_empty() {
+            let mut condition = Condition::any()
+                .add(operator::Column::Username.contains(search))
+                .add(operator::Column::Email.contains(search));
+            if let Ok(id_user) = search.parse::<i32>() {
+                condition = condition.add(operator::Column::IdUser.eq(id_user));
+            }
+            query = query.filter(condition);
+        }
+        let records_filtered = query
+            .clone()
+            .count(&self.database)
+            .await
+            .context("failed to count filtered operators")?;
+        let operators = query
+            .order_by_asc(operator::Column::IdUser)
+            .offset(start)
+            .limit(length)
+            .all(&self.database)
+            .await
+            .context("failed to list operators")?;
+        Ok(OperatorPage {
+            records_total,
+            records_filtered,
+            operators,
+        })
+    }
+}
+
+async fn encrypt_password(
+    password_crypto: Arc<dyn PasswordCryptoService>,
+    user_id: i32,
+    password: String,
+) -> anyhow::Result<String> {
+    tokio::task::spawn_blocking(move || password_crypto.encrypt_password(user_id, &password))
+        .await
+        .context("password encryption task failed")?
+}
+
+pub fn current_timestamp() -> String {
+    let now = time::OffsetDateTime::now_utc();
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        now.year(),
+        u8::from(now.month()),
+        now.day(),
+        now.hour(),
+        now.minute(),
+        now.second()
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::{
+        models::{
+            database,
+            operator_repository::{NewOperator, OperatorRepository, UpdateOperator},
+        },
+        services::password_crypto::{PasswordCryptoService, PasswordVerification},
+    };
+
+    struct TestPasswordCrypto;
+
+    impl PasswordCryptoService for TestPasswordCrypto {
+        fn encrypt_password(&self, user_id: i32, password: &str) -> anyhow::Result<String> {
+            Ok(format!("encrypted:{user_id}:{}", password.len()))
+        }
+
+        fn verify_password(
+            &self,
+            _user_id: i32,
+            _encrypted_record: &str,
+            _password: &str,
+        ) -> anyhow::Result<PasswordVerification> {
+            Ok(PasswordVerification {
+                valid: true,
+                replacement_record: None,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn creates_updates_lists_and_deletes_operator() {
+        let database_path = std::env::temp_dir().join(format!(
+            "kraken-ui-operators-{}-{}.sqlite",
+            std::process::id(),
+            time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+        ));
+        let database = database::connect(&database_path)
+            .await
+            .unwrap_or_else(|error| panic!("test database must connect: {error}"));
+        let repository = OperatorRepository::new(database, Arc::new(TestPasswordCrypto));
+
+        let created = repository
+            .create(NewOperator {
+                username: "admin",
+                email: "admin@example.invalid",
+                operator_type: "admin",
+                password: "Long&Random#Pass9",
+            })
+            .await
+            .unwrap_or_else(|error| panic!("operator must be created: {error}"));
+        assert_eq!(created.id_user, 1);
+        assert_eq!(created.encrypted_password_hash, "encrypted:1:17");
+
+        let updated = repository
+            .update(
+                created,
+                UpdateOperator {
+                    username: "admin2",
+                    email: "admin2@example.invalid",
+                    operator_type: "admin",
+                    password: None,
+                },
+            )
+            .await
+            .unwrap_or_else(|error| panic!("operator must be updated: {error}"));
+        assert_eq!(updated.username, "admin2");
+
+        let page = repository
+            .page(0, 10, "admin2")
+            .await
+            .unwrap_or_else(|error| panic!("operators must be listed: {error}"));
+        assert_eq!(page.records_filtered, 1);
+
+        let rows = repository
+            .delete_by_id(updated.id_user)
+            .await
+            .unwrap_or_else(|error| panic!("operator must be deleted: {error}"));
+        assert_eq!(rows, 1);
+        let _ignored = tokio::fs::remove_file(database_path).await;
+    }
+}

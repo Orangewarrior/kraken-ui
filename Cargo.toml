@@ -1,0 +1,40 @@
+[package]
+name = "kraken-ui"
+version = "0.3.0"
+edition = "2024"
+license = "BSD-3-Clause"
+publish = false
+
+[dependencies]
+ammonia = "4.1"
+anyhow = "1.0"
+askama = "0.14"
+axum = "0.8.8"
+axum-server = { version = "0.8", features = ["tls-rustls"] }
+axum_csrf = { version = "0.11", features = ["layer"] }
+base64 = "0.22"
+chacha20poly1305 = { version = "0.10.1", features = ["std"] }
+dryoc = { version = "0.8", features = ["base64"] }
+memchr = "2.7"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std"] }
+sea-orm = { version = "1.1", default-features = false, features = ["macros", "runtime-tokio-rustls", "sqlx-sqlite"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+time = "0.3"
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal"] }
+tower-http = { version = "0.6", features = ["fs", "trace"] }
+tower-sessions = { version = "0.15", features = ["signed"] }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+zeroize = "1.8"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

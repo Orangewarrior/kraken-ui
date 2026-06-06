@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>{{ product_name }} — Attack Evidence</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body class="evidence-page" data-page="evidence">
+  <main class="evidence-shell" aria-labelledby="evidence-title">
+    <header class="evidence-header"><a class="brand" href="/attacks"><img class="brand-mark-img" src="/static/img/logo-mark.png" width="40" height="40" alt="" aria-hidden="true" decoding="async"><span class="brand-text">Kraken<span>Waf</span></span></a><span class="badge">Evidence #{{ attack_id }}</span></header>
+    <section class="evidence-card"><div class="evidence-title-row"><div><h1 id="evidence-title">{{ title }}</h1><p>{{ subtitle }}</p></div><a class="ghost-button" href="/attacks">Back to attacks</a></div><pre class="code-window"><code data-evidence-code>{{ evidence }}</code></pre></section>
+  </main>
+</body>
+</html>

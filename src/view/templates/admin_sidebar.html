@@ -1,0 +1,52 @@
+<header class="mobile-topbar">
+  <a class="brand" href="/kraken_ui/auth/painel_admin">
+    <img class="brand-mark-img" src="/static/img/logo-mark.png" width="40" height="40" alt="" aria-hidden="true">
+    <span class="brand-text">Kraken<span>Waf</span></span>
+  </a>
+  <button class="menu-toggle" type="button" data-menu-toggle aria-expanded="false" aria-label="Open navigation">Menu</button>
+</header>
+<aside class="sidebar" aria-label="Admin navigation">
+  <a class="brand" href="/kraken_ui/auth/painel_admin">
+    <img class="brand-mark-img" src="/static/img/logo-mark.png" width="40" height="40" alt="" aria-hidden="true">
+    <span class="brand-text">Kraken<span>Waf</span></span>
+  </a>
+  <nav class="nav">
+    <div class="nav-section">
+      <a class="nav-link{% if active_page == "dashboard" %} active{% endif %}" href="/kraken_ui/auth/painel_admin">
+        <span class="nav-icon" aria-hidden="true">#</span><strong>Dashboard</strong>
+      </a>
+    </div>
+    <div class="nav-section">
+      <button class="nav-trigger{% if active_page == "acl" %} active{% endif %}" type="button" data-accordion aria-expanded="true" aria-controls="acl-menu">
+        <span class="nav-icon" aria-hidden="true">A</span><strong>ACL</strong><span class="chevron" aria-hidden="true">v</span>
+      </button>
+      <div class="submenu" id="acl-menu">
+        <a href="/kraken_ui/auth/insert_user">Adicionar usuario</a>
+        <a href="/kraken_ui/auth/show_user_table">Listar usuarios</a>
+        <a href="/kraken_ui/auth/delete_user">Remover usuario</a>
+        <a href="/kraken_ui/auth/edit_user">Procurar usuario</a>
+      </div>
+    </div>
+    <div class="nav-section">
+      <button class="nav-trigger{% if active_page == "monitor" %} active{% endif %}" type="button" data-accordion aria-expanded="true" aria-controls="monitor-menu">
+        <span class="nav-icon" aria-hidden="true">M</span><strong>Monitor</strong><span class="chevron" aria-hidden="true">v</span>
+      </button>
+      <div class="submenu" id="monitor-menu">
+        <a href="/kraken_ui/auth/show_attacks">Tabela de ataques</a>
+      </div>
+    </div>
+    <div class="nav-section">
+      <button class="nav-trigger{% if active_page == "user_status" %} active{% endif %}" type="button" data-accordion aria-expanded="true" aria-controls="user-menu">
+        <span class="nav-icon" aria-hidden="true">U</span><strong>User status</strong><span class="chevron" aria-hidden="true">v</span>
+      </button>
+      <div class="submenu" id="user-menu">
+        <a href="/kraken_ui/auth/update_password">Change password</a>
+        <form action="/kraken_ui/auth/logout" method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="submenu-button" type="submit">Logout</button>
+        </form>
+      </div>
+    </div>
+  </nav>
+  <section class="status-card"><span>Admin console</span><strong>Authenticated</strong><small>TLS session active</small></section>
+</aside>

@@ -1,0 +1,119 @@
+name: Security - SAST and SCA
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  test-and-clippy:
+    name: SAST - tests and Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+      - run: cargo fmt --check
+      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings
+
+  semgrep:
+    name: SAST - Semgrep
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Seed empty SARIF
+        run: |
+          printf '%s\n' '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"semgrep","rules":[]}},"results":[]}]}' > semgrep.sarif
+      - name: Scan
+        run: >
+          semgrep scan
+          --config p/rust
+          --config p/security-audit
+          --config p/owasp-top-ten
+          --config p/secrets
+          --error
+          --sarif
+          --output semgrep.sarif
+        continue-on-error: true
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always() && hashFiles('semgrep.sarif') != ''
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  cargo-audit:
+    name: SCA - cargo-audit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit
+
+  cargo-deny:
+    name: SCA - cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories licenses bans sources
+
+  osv-scan:
+    name: SCA - OSV Scanner
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OSV Scanner
+        run: |
+          curl -sSfL \
+            "https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64" \
+            -o /usr/local/bin/osv-scanner
+          chmod +x /usr/local/bin/osv-scanner
+      - name: Seed empty SARIF
+        run: |
+          printf '%s\n' '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"osv-scanner","rules":[]}},"results":[]}]}' > osv.sarif
+      - name: Scan
+        run: osv-scanner --lockfile=Cargo.lock --format=sarif --output-file=osv.sarif || true
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always() && hashFiles('osv.sarif') != ''
+        with:
+          sarif_file: osv.sarif
+          category: osv-scanner
+
+  codeql:
+    name: SAST - CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+          queries: security-and-quality
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: codeql-rust

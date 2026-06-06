@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>{{ product_name }} — Login</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body data-page="login" class="auth-page">
+  <main class="auth-shell" aria-labelledby="login-title">
+    <section class="auth-visual" aria-hidden="true">
+      <img class="auth-logo-watermark" src="/static/img/logo-mark.png" width="140" height="140" alt="" decoding="async">
+      <div class="auth-orbit"></div>
+      <div class="auth-gridlines"></div>
+    </section>
+
+    <section class="auth-card">
+      <a class="brand auth-brand" href="/">
+        <img class="brand-mark-img" src="/static/img/logo-mark.png" width="40" height="40" alt="" aria-hidden="true" decoding="async">
+        <span class="brand-text">Kraken<span>Waf</span></span>
+      </a>
+
+      <div class="auth-heading">
+        <span class="badge">Secure Console Access</span>
+        <h1 id="login-title">Sign in to <span class="accent">{{ product_name }}</span></h1>
+        <p class="lead">Authenticate to manage ACLs, inspect logs, tune rules, and monitor real-time WAF metrics.</p>
+      </div>
+
+      {% if error_message != "" %}
+      <p class="auth-error" role="alert">{{ error_message }}</p>
+      {% endif %}
+
+      <form class="login-form" method="post" action="/login" autocomplete="on">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+        <div class="field-group">
+          <label for="login">Login</label>
+          <input id="login" name="login" type="text" inputmode="email" autocomplete="username" placeholder="admin@example.local" required minlength="3" maxlength="128" spellcheck="false">
+        </div>
+
+        <div class="field-group">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" placeholder="••••••••••••" required minlength="8" maxlength="256">
+        </div>
+
+        <div class="form-row">
+          <label class="check-row" for="remember-session">
+            <input id="remember-session" name="remember" type="checkbox" value="yes">
+            <span>Keep this device signed in</span>
+          </label>
+          <a class="form-link" href="#recover-account">Forgot password?</a>
+        </div>
+
+        <button class="cta submit-button" type="submit">Submit →</button>
+      </form>
+
+      <div class="auth-note" role="note">
+        <strong>Security note:</strong> keep this endpoint behind HTTPS, server-side sessions, rate limiting, CSRF validation, and audit logging before production use.
+      </div>
+    </section>
+  </main>
+</body>
+</html>

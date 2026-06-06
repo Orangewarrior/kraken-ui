@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>KrakenWAF - Remover usuario</title><link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script></head>
+<body data-page="acl-form"><div class="shell admin-shell">{% include "admin_sidebar.html" %}<main class="page admin-content">
+  <section class="page-hero compact-hero"><span class="badge danger-badge">ACL</span><h1>Remover usuario</h1><p class="lead">Informe o ID numerico ou e-mail exato da conta.</p></section>
+  <section class="panel form-panel">
+    {% if message != "" %}<p class="form-message {{ message_class }}" role="status">{{ message }}</p>{% endif %}
+    <form class="login-form management-form" method="post" action="/kraken_ui/auth/delete_user_action" data-confirm-delete>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="field-group"><label for="user_identity">User ID or e-mail</label><input id="user_identity" name="user_identity" required maxlength="128" value="{{ user_identity }}"></div>
+      <button class="cta danger-button" type="submit">Remover usuario</button>
+    </form>
+  </section>
+</main></div></body></html>

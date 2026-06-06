@@ -1,0 +1,10 @@
+---
+cert-ca: certs/ca.pem
+key: certs/key.pem
+listen: "127.0.0.1:3443"
+db-local: db/kraken-ui.sqlite
+db_local: "../KrakenWAF/logs/db/vulns_alert.db"
+waf-endpoint: "https://127.0.0.1:8443"
+waf-cert-ca: "../KrakenWAF/certs/cert.pem"
+log-dir: log
+session-timeout-minutes: 30

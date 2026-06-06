@@ -1,0 +1,16 @@
+[package]
+name = "krakenwaf-ui-template"
+version = "0.1.0"
+edition = "2021"
+license = "BSD-3-Clause OR MIT"
+publish = false
+
+[dependencies]
+anyhow = "1"
+askama = "0.12"
+axum = "0.8"
+http = "1"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+tower-http = { version = "0.6", features = ["fs", "set-header", "trace"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

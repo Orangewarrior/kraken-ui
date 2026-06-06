@@ -1,0 +1,275 @@
+use std::{env, fs, sync::Arc};
+
+use anyhow::{Context, bail};
+use axum::{Router, middleware};
+use axum_csrf::{CsrfConfig, CsrfLayer, SameSite};
+use time::Duration;
+use tower_http::trace::TraceLayer;
+use tower_sessions::{
+    Expiry, MemoryStore, SessionManagerLayer,
+    cookie::{Key, SameSite as SessionSameSite},
+};
+use tracing::{info, warn};
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::EnvFilter;
+
+use crate::{
+    config::AppConfig,
+    middleware::security_headers,
+    models::{
+        database,
+        operator_repository::{NewOperator, OperatorRepository},
+    },
+    routes,
+    security::{
+        headers,
+        password::{MediumOrStrongPasswordPolicy, PasswordPolicy},
+        sanitize,
+    },
+    services::{
+        password_crypto::{DryocPasswordCryptoService, PasswordCryptoService},
+        waf_metrics::WafMetricsService,
+    },
+    state::AppState,
+};
+
+pub struct AppFactory {
+    config: AppConfig,
+    password_crypto: Option<Arc<dyn PasswordCryptoService>>,
+    waf_metrics: Option<WafMetricsService>,
+}
+
+impl AppFactory {
+    pub fn new(config: AppConfig) -> Self {
+        Self {
+            config,
+            password_crypto: None,
+            waf_metrics: None,
+        }
+    }
+
+    pub fn with_password_crypto(mut self, password_crypto: Arc<dyn PasswordCryptoService>) -> Self {
+        self.password_crypto = Some(password_crypto);
+        self
+    }
+
+    pub fn with_waf_metrics(mut self, waf_metrics: WafMetricsService) -> Self {
+        self.waf_metrics = Some(waf_metrics);
+        self
+    }
+
+    pub async fn build(self) -> anyhow::Result<Router> {
+        let database = database::connect(&self.config.database_path).await?;
+        let waf_database = match &self.config.waf_database_path {
+            Some(path) if path.exists() => Some(database::connect_read_only(path).await?),
+            Some(path) => {
+                warn!(path = %path.display(), "WAF database does not exist; attack views will be empty");
+                None
+            }
+            None => {
+                warn!("db_local is not configured; attack views will be empty");
+                None
+            }
+        };
+        let password_policy: Arc<dyn PasswordPolicy> = Arc::new(MediumOrStrongPasswordPolicy);
+        let password_crypto = match self.password_crypto {
+            Some(service) => service,
+            None => Arc::new(DryocPasswordCryptoService::from_environment()?),
+        };
+        bootstrap_administrator(&database, password_policy.as_ref(), password_crypto.clone())
+            .await?;
+        let waf_metrics = match self.waf_metrics {
+            Some(service) => service,
+            None => {
+                WafMetricsService::new(
+                    &self.config.waf_endpoint,
+                    self.config.waf_certificate_path(),
+                )
+                .await?
+            }
+        };
+        let security_headers = headers::load("conf/headers_sec.txt").await?;
+        let state = AppState {
+            config: Arc::new(self.config.clone()),
+            database,
+            waf_database,
+            security_headers: Arc::new(security_headers),
+            password_policy,
+            password_crypto,
+            waf_metrics,
+            first_time_lock: Arc::new(tokio::sync::Mutex::new(())),
+        };
+
+        let session_minutes = i64::try_from(self.config.session_timeout_minutes)
+            .context("session timeout does not fit in i64")?;
+        let session_layer = SessionManagerLayer::new(MemoryStore::default())
+            .with_name("__Host-kraken_session")
+            .with_path("/")
+            .with_http_only(true)
+            .with_secure(true)
+            .with_same_site(SessionSameSite::Strict)
+            .with_expiry(Expiry::OnInactivity(Duration::minutes(session_minutes)))
+            .with_signed(Key::generate());
+        let csrf_config = CsrfConfig::default()
+            .with_cookie_name("kraken_csrf")
+            .with_cookie_path("/")
+            .with_cookie_same_site(SameSite::Strict)
+            .with_http_only(true)
+            .with_secure(true)
+            .with_prefix_with_host(true);
+
+        let application = routes::create(state.clone())
+            .layer(TraceLayer::new_for_http())
+            .layer(CsrfLayer::new(csrf_config))
+            .layer(session_layer)
+            .layer(middleware::from_fn_with_state(
+                state,
+                security_headers::apply,
+            ));
+        Ok(application)
+    }
+}
+
+pub fn initialize_logging(config: &AppConfig) -> anyhow::Result<WorkerGuard> {
+    fs::create_dir_all(&config.log_directory).with_context(|| {
+        format!(
+            "unable to create log directory {}",
+            config.log_directory.display()
+        )
+    })?;
+    let file_appender = tracing_appender::rolling::never(&config.log_directory, "kraken-ui.jsonl");
+    let (writer, guard) = tracing_appender::non_blocking(file_appender);
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("kraken_ui=info,tower_http=info"));
+    tracing_subscriber::fmt()
+        .json()
+        .with_env_filter(filter)
+        .with_writer(writer)
+        .with_current_span(false)
+        .with_span_list(false)
+        .try_init()
+        .map_err(|error| {
+            anyhow::anyhow!("global tracing subscriber was already initialized: {error}")
+        })?;
+    Ok(guard)
+}
+
+async fn bootstrap_administrator(
+    database: &sea_orm::DatabaseConnection,
+    password_policy: &dyn PasswordPolicy,
+    password_crypto: Arc<dyn PasswordCryptoService>,
+) -> anyhow::Result<()> {
+    let repository = OperatorRepository::new(database.clone(), password_crypto);
+    if repository.find_by_username("admin").await?.is_some() {
+        return Ok(());
+    }
+
+    let Ok(raw_password) = env::var("KRAKEN_UI_ADMIN_PASSWORD") else {
+        warn!("no administrator exists; set KRAKEN_UI_ADMIN_PASSWORD before the first startup");
+        return Ok(());
+    };
+    let password = raw_password;
+    if sanitize::secret_has_rejected_markup(&password) {
+        bail!("KRAKEN_UI_ADMIN_PASSWORD contains rejected markup");
+    }
+    if password_policy.validate(&password, "admin").is_err() {
+        bail!("KRAKEN_UI_ADMIN_PASSWORD does not satisfy the password policy");
+    }
+    let email =
+        env::var("KRAKEN_UI_ADMIN_EMAIL").unwrap_or_else(|_| "admin@localhost.invalid".to_owned());
+    repository
+        .create(NewOperator {
+            username: "admin",
+            email: &email,
+            operator_type: "admin",
+            password: &password,
+        })
+        .await?;
+    info!("bootstrap administrator created");
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use anyhow::bail;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    use super::AppFactory;
+    use crate::{
+        config::AppConfig,
+        services::{
+            password_crypto::{PasswordCryptoService, PasswordVerification},
+            waf_metrics::WafMetricsService,
+        },
+    };
+
+    struct TestPasswordCrypto;
+
+    impl PasswordCryptoService for TestPasswordCrypto {
+        fn encrypt_password(&self, _user_id: i32, _password: &str) -> anyhow::Result<String> {
+            Ok("test-envelope".to_owned())
+        }
+
+        fn verify_password(
+            &self,
+            _user_id: i32,
+            _encrypted_record: &str,
+            _password: &str,
+        ) -> anyhow::Result<PasswordVerification> {
+            bail!("not used in this test")
+        }
+    }
+
+    #[tokio::test]
+    async fn applies_configured_security_headers_to_public_responses() {
+        let database_path =
+            std::env::temp_dir().join(format!("kraken-ui-test-{}.sqlite", std::process::id()));
+        let config = AppConfig {
+            certificate_path: "unused-cert.pem".into(),
+            private_key_path: "unused-key.pem".into(),
+            listen: "127.0.0.1:3443".to_owned(),
+            database_path: database_path.clone(),
+            waf_database_path: None,
+            waf_endpoint: "https://127.0.0.1:8443".to_owned(),
+            waf_certificate_path: None,
+            log_directory: std::env::temp_dir(),
+            session_timeout_minutes: 30,
+        };
+        let application = AppFactory::new(config)
+            .with_password_crypto(Arc::new(TestPasswordCrypto))
+            .with_waf_metrics(
+                WafMetricsService::without_custom_ca("https://127.0.0.1:8444")
+                    .unwrap_or_else(|error| panic!("test metrics client must build: {error}")),
+            )
+            .build()
+            .await
+            .unwrap_or_else(|error| panic!("test application must build: {error}"));
+        let request = Request::builder()
+            .uri("/health")
+            .body(Body::empty())
+            .unwrap_or_else(|error| panic!("health request must be valid: {error}"));
+        let response = application
+            .oneshot(request)
+            .await
+            .unwrap_or_else(|error| panic!("health request must complete: {error}"));
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("x-frame-options")
+                .and_then(|value| value.to_str().ok()),
+            Some("DENY")
+        );
+        assert!(response.headers().contains_key("content-security-policy"));
+        assert!(response.headers().contains_key("strict-transport-security"));
+
+        let _ignored = tokio::fs::remove_file(database_path).await;
+    }
+}

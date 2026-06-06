@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>KrakenWAF - Editar usuario</title><link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script></head>
+<body data-page="acl-form"><div class="shell admin-shell">{% include "admin_sidebar.html" %}<main class="page admin-content">
+  <section class="page-hero compact-hero"><span class="badge">ACL</span><h1>Procurar e editar usuario</h1></section>
+  <section class="panel form-panel">
+    {% if message != "" %}<p class="form-message {{ message_class }}" role="status">{{ message }}</p>{% endif %}
+    {% if show_form && has_user %}
+    <form class="login-form management-form" method="post" action="/kraken_ui/auth/update_user_action" autocomplete="off" data-password-policy>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="id_user" value="{{ id_user }}">
+      <div class="field-group"><label for="username">Username</label><input id="username" name="username" value="{{ username }}" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_.-]{3,32}"></div>
+      <div class="field-group"><label for="email">E-mail</label><input id="email" name="email" type="email" value="{{ email }}" required maxlength="128"></div>
+      <div class="field-group"><label for="user_type">User type</label><select id="user_type" name="user_type">{% for role in roles %}<option value="{{ role.value }}"{% if role.selected %} selected{% endif %}>{{ role.label }}</option>{% endfor %}</select></div>
+      <div class="field-group"><label for="password">Nova password</label><input id="password" name="password" type="password" minlength="14" maxlength="256" data-strong-password data-optional-password><span data-password-strength>Strength: unchanged</span><ul class="password-rules" data-password-rules><li data-rule="length">Minimo de 14 caracteres</li><li data-rule="lower">Letra minuscula</li><li data-rule="upper">Letra maiuscula</li><li data-rule="digit">Numero</li><li data-rule="symbol">Simbolo</li><li data-rule="identity">Sem dados de identidade</li></ul></div>
+      <button class="cta" type="submit" data-policy-submit>Atualizar usuario</button>
+    </form>
+    {% else if show_form %}
+    <form class="login-form management-form" method="post" action="/kraken_ui/auth/edit_user">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="field-group"><label for="id_user">User ID</label><input id="id_user" name="id_user" type="number" min="1" required></div>
+      <button class="cta" type="submit">Procurar usuario</button>
+    </form>
+    {% endif %}
+  </section>
+</main></div></body></html>
