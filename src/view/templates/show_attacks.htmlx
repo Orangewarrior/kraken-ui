@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>KrakenWAF - Ataques</title><link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>KrakenWAF - Attacks</title><link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script></head>
 <body data-page="attacks"><div class="shell admin-shell">{% include "admin_sidebar.html" %}<main class="page admin-content">
-  <section class="page-hero compact-hero"><span class="badge">Monitor</span><h1>Ataques observados</h1><p class="lead">Pesquise por data, severidade, IP, pais ou titulo. Clique em Severity para alternar a ordenacao.</p></section>
+  <section class="page-hero compact-hero"><span class="badge">Monitor</span><h1>Observed attacks</h1><p class="lead">Search by date, severity, IP, country or title. Click Severity to toggle the sort order.</p></section>
   {% if database_available %}
   <section class="table-card"><div class="table-toolbar"><h2>Vulnerabilities</h2><label class="table-search"><span>Search</span><input type="search" data-kw-table-search="attacks-table" autocomplete="off"></label></div>
     <div class="table-scroll"><table id="attacks-table" class="kw-table" data-kw-table data-table-kind="attacks" data-ajax-url="/kraken_ui/auth/api/attacks" data-server-side="true" data-page-size="50"><thead><tr><th>ID</th><th data-sort-severity tabindex="0">Severity</th><th>Title</th><th>Client IP</th><th>Request URI</th><th>Rule match</th><th>Occurred at</th><th>Country</th></tr></thead><tbody></tbody></table></div>
-    <div class="table-footer"><button type="button" class="ghost-button" data-kw-table-prev="attacks-table">Anterior</button><span data-kw-table-info="attacks-table">Loading...</span><button type="button" class="ghost-button" data-kw-table-next="attacks-table">Proxima</button></div>
+    <div class="table-footer"><button type="button" class="ghost-button" data-kw-table-prev="attacks-table">Previous</button><span data-kw-table-info="attacks-table">Loading...</span><button type="button" class="ghost-button" data-kw-table-next="attacks-table">Next</button></div>
   </section>
-  {% else %}<section class="panel"><p class="form-message error">O banco do WAF configurado em db_local nao esta disponivel.</p></section>{% endif %}
+  {% else %}<section class="panel"><p class="form-message error">The WAF database configured in db_local is not available.</p></section>{% endif %}
 </main></div></body></html>

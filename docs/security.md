@@ -1,49 +1,78 @@
-# Segurança
+# Security
 
-## Controles
+This document describes the controls Kraken UI relies on and the reasoning
+behind them. For a running list of known gaps and proposed improvements, see
+[security-review.md](security-review.md).
 
-- TLS é obrigatório no processo; não existe opção HTTP.
-- Cookies de sessão e CSRF usam `Secure`, `HttpOnly`, `SameSite=Strict`, path `/` e prefixo `__Host-`.
-- Login e logout usam POST com token CSRF.
-- Senhas são processadas com `dryoc` usando o formato Argon2id moderado compatível com libsodium e nunca são registradas.
-- Entradas textuais passam por Ammonia. Segredos são rejeitados se o sanitizador os alteraria, sem modificar seus bytes.
-- O CSP proíbe inline script/style. O JavaScript local não usa `innerHTML`, em conformidade com Trusted Types.
-- Logs são JSONL e eventos não incluem senha, hash, token CSRF ou conteúdo de sessão.
+## Controls
 
-## Política de licenças
+- **TLS is mandatory.** The process serves HTTPS only — there is no HTTP
+  option to misconfigure.
+- **Hardened cookies.** Session and CSRF cookies use `Secure`, `HttpOnly`,
+  `SameSite=Strict`, a `/` path and the `__Host-` prefix.
+- **CSRF on every mutation.** Login, logout and all state-changing requests use
+  POST with a CSRF token.
+- **Strong password storage.** Passwords are hashed with `dryoc` using the
+  libsodium-compatible Argon2id "moderate" profile, then encrypted. They are
+  never logged.
+- **Input sanitisation.** Free-text input passes through Ammonia. Secrets are
+  *rejected* if the sanitiser would alter them, rather than being silently
+  modified — so a password is never quietly changed under the user's feet.
+- **A strict CSP.** Inline scripts and styles are forbidden. The local
+  JavaScript never uses `innerHTML`, which keeps it compatible with Trusted
+  Types.
+- **Privacy-preserving logs.** Logs are JSONL, and events never include a
+  password, hash, CSRF token or session contents.
 
-Dependências diretas precisam oferecer MIT, BSD-2-Clause ou BSD-3-Clause. A árvore transitiva não consegue obedecer apenas a essas três licenças:
+## Licence policy
 
-- Ammonia depende de componentes MPL-2.0.
-- AXUM depende de `sync_wrapper` Apache-2.0.
-- Rustls e SQLite via SeaORM usam componentes ISC, Apache-2.0, Unicode-3.0 e CDLA-Permissive.
+Direct dependencies must offer MIT, BSD-2-Clause or BSD-3-Clause. The
+transitive tree cannot be satisfied with only those three, because:
 
-Essas exceções permissivas ou de copyleft fraco estão explícitas em `deny.toml`. `cargo-deny` falhará para licenças novas fora da lista, evitando expansão silenciosa da política.
+- Ammonia depends on MPL-2.0 components.
+- Axum depends on the Apache-2.0 `sync_wrapper`.
+- Rustls and SQLite (via SeaORM) pull in ISC, Apache-2.0, Unicode-3.0 and
+  CDLA-Permissive components.
 
-## Bootstrap
+These permissive and weak-copyleft exceptions are listed explicitly in
+`deny.toml`. `cargo-deny` fails on any new licence outside that list, which
+prevents the policy from quietly expanding over time.
 
-Se não houver administrador, a aplicação lê `KRAKEN_UI_ADMIN_PASSWORD` e `KRAKEN_UI_ADMIN_EMAIL`. A senha deve ter no mínimo 14 caracteres, letras maiúsculas e minúsculas, número e símbolo, sem espaço nem o nome do usuário.
+## Bootstrapping the first administrator
 
-## Envelope de senha
+If no administrator exists, the application reads `KRAKEN_UI_ADMIN_PASSWORD`
+and `KRAKEN_UI_ADMIN_EMAIL`. The password must be at least 14 characters and
+include upper- and lower-case letters, a number and a symbol, with no spaces
+and without containing the username.
 
-O valor persistido em `encrypted_password_hash` é:
+## The password envelope
+
+The value stored in `encrypted_password_hash` is:
 
 ```text
 base64(key_id[16] || nonce[24] || xchacha20poly1305_ciphertext)
 ```
 
-O plaintext cifrado é o registro completo retornado por `crypto_pwhash_str`, incluindo salt e parâmetros. O AAD é:
+The encrypted plaintext is the complete record returned by `crypto_pwhash_str`,
+including the salt and parameters. The AAD (additional authenticated data) is:
 
 ```text
 kraken_ui:v1:user:<id_user>:password_hash
 ```
 
-Isso impede copiar o ciphertext de um operador para outro. No login, o serviço decifra, executa `crypto_pwhash_str_verify` e compara os parâmetros Argon2id com a política moderada atual. Se estiverem antigos, gera e persiste um novo envelope.
+Binding the AAD to the user id means a ciphertext copied from one operator to
+another will fail authentication. At login the service decrypts the envelope,
+runs `crypto_pwhash_str_verify`, and compares the stored Argon2id parameters
+against the current "moderate" policy. If they are out of date, it transparently
+generates and persists a fresh envelope.
 
-## Chaves
+## Keys
 
-- `KRAKEN_UI_PASSWORD_KEY`: chave de 32 bytes codificada em Base64.
-- `KRAKEN_UI_PASSWORD_KEY_FILE`: arquivo contendo a chave Base64; no Unix deve ter permissão sem acesso para grupo ou outros.
-- `KRAKEN_UI_PASSWORD_KEY_ID`: identificador ASCII de até 16 bytes, padrão `primary-v1`.
+- `KRAKEN_UI_PASSWORD_KEY` — a 32-byte key, Base64-encoded.
+- `KRAKEN_UI_PASSWORD_KEY_FILE` — a file containing the Base64 key. On Unix it
+  must not be readable by group or others.
+- `KRAKEN_UI_PASSWORD_KEY_ID` — an ASCII identifier of up to 16 bytes
+  (default `primary-v1`).
 
-A aplicação não inicia sem uma fonte de chave. A chave nunca entra no banco, templates, sessão ou logs.
+The application will not start without a key source. The key never reaches the
+database, templates, sessions or logs.

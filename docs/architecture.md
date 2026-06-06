@@ -1,37 +1,60 @@
-# Arquitetura
+# Architecture
 
-## Organização
+This is a tour of how Kraken UI is put together. The goal is that you can open
+any module and immediately know what it is responsible for.
 
-- `src/routes`: declara endpoints e encaminha para controllers.
-- `src/controllers`: trata HTTP, CSRF, sessão e renderização.
-- `src/models`: entidade `operators`, schema e repositório SeaORM.
-- `src/view`: templates Askama e assets locais.
-- `src/middleware`: autenticação e headers globais.
-- `src/security`: sanitização, senha e parser de headers.
-- `src/app.rs`: `AppFactory`, composição de estado e camadas.
+## How the code is organised
 
-## Padrões
+| Module           | Responsibility |
+|------------------|----------------|
+| `src/routes`     | Declares every endpoint and forwards it to a controller. |
+| `src/controllers`| Handles HTTP: CSRF, sessions and template rendering. |
+| `src/models`     | The `operators` entity, schema and SeaORM repositories. |
+| `src/view`       | Askama templates and the local CSS/JS assets. |
+| `src/middleware` | Authentication and the global security-header layer. |
+| `src/security`   | Input sanitisation, the password policy and the header parser. |
+| `src/services`   | The password-crypto and WAF-metrics boundaries. |
+| `src/app.rs`     | `AppFactory` — wires up state, layers and the router. |
 
-`AppFactory` centraliza a construção da aplicação. `PasswordPolicy` é uma strategy substituível para validação de senha. Configurações de sessão e CSRF usam builders das próprias crates.
+## Design choices worth knowing
 
-`PasswordCryptoService` é o boundary do serviço criptográfico isolado. A implementação atual usa `dryoc`, compatível com as funções de password hashing do libsodium, no mesmo processo. Controllers e repositórios dependem apenas do trait. Uma implementação por Unix socket, serviço sidecar, HSM ou KMS pode substituí-la sem mudar o fluxo HTTP.
+**`AppFactory` is the single place the application is built.** State, session
+and CSRF configuration, and middleware layers are all composed here, which
+keeps `main.rs` tiny and makes the app easy to assemble in tests.
 
-Controllers não executam SQL. O repositório de usuário usa a API de expressão do SeaORM, que gera parâmetros vinculados em vez de concatenar entrada em SQL.
+**The password policy is swappable.** `PasswordPolicy` is a small strategy
+trait, so the validation rules can be replaced without touching the controllers
+that depend on it.
 
-O banco interno configurado por `db-local` é gravável. O banco externo do
-KrakenWAF configurado por `db_local` é aberto por uma segunda conexão SeaORM em
-modo somente leitura.
+**Cryptography sits behind a boundary.** `PasswordCryptoService` is a trait, and
+the current implementation (`DryocPasswordCryptoService`) runs libsodium-compatible
+Argon2id in-process via `dryoc`. Because controllers and repositories depend
+only on the trait, you could later swap in an implementation backed by a Unix
+socket, a sidecar service, an HSM or a KMS without changing the HTTP flow.
 
-`WafMetricsService` usa HTTPS e o certificado configurado para consultar
-`waf-endpoint/metrics`, com fallback para `/__kwaf/metrics`. O parser aceita o
-formato de exposição Prometheus e não executa conteúdo recebido.
-Quando o KrakenWAF usa certificado próprio, `waf-cert-ca` deve apontar para o
-PEM confiável apresentado pelo serviço.
+**Controllers never write SQL.** The operator repository uses SeaORM's
+expression API, which produces bound parameters instead of concatenating user
+input into a query string.
 
-## Fluxo HTTP
+**Two databases, two postures.** The UI's own database (`db-local`) is opened
+read-write. The KrakenWAF alerts database (`db_local`) is opened through a
+second SeaORM connection in **read-only** mode, so the console can never modify
+the WAF's data.
 
-Apenas login, assets, health check e o POST one-shot `first_time` são públicos.
-`first_time` exige conexão TCP loopback e fecha quando a tabela contém um
-registro. O restante do namespace `/kraken_ui/auth` exige sessão do tipo
-`admin`. Toda resposta, inclusive erro, redirect e asset estático, passa pelo
-middleware que aplica `conf/headers_sec.txt`.
+**Metrics are pulled over HTTPS.** `WafMetricsService` uses the configured
+certificate to query `waf-endpoint/metrics`, falling back to `/__kwaf/metrics`.
+The parser understands the Prometheus exposition format and never executes the
+content it receives. When KrakenWAF presents its own certificate, point
+`waf-cert-ca` at the trusted PEM.
+
+## The HTTP request flow
+
+Only four things are public: the login page, static assets, the health check
+and the one-shot `first_time` bootstrap POST. `first_time` additionally
+requires a loopback TCP connection and closes itself the moment the operators
+table contains a row.
+
+Everything under `/kraken_ui/auth` requires an `admin` session. **Every**
+response — including errors, redirects and static assets — passes through the
+middleware that applies `conf/headers_sec.txt`, so there is no path that can
+escape the hardening headers.

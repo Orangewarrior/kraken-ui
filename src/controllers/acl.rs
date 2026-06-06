@@ -107,14 +107,18 @@ pub async fn insert_user_action(
     };
     let repository = repository(&state);
     if repository.find_by_email(&input.email).await?.is_some() {
-        return render_add_user(token, "O e-mail informado ja existe.".to_owned(), "error");
+        return render_add_user(
+            token,
+            "That email address is already registered.".to_owned(),
+            "error",
+        );
     }
     if repository
         .find_by_username(&input.username)
         .await?
         .is_some()
     {
-        return render_add_user(token, "O username informado ja existe.".to_owned(), "error");
+        return render_add_user(token, "That username is already taken.".to_owned(), "error");
     }
     repository
         .create(NewOperator {
@@ -127,7 +131,7 @@ pub async fn insert_user_action(
                 .ok_or_else(|| AppError::internal(anyhow!("validated password is missing")))?,
         })
         .await?;
-    render_add_user(token, "Usuario inserido com sucesso.".to_owned(), "success")
+    render_add_user(token, "User created successfully.".to_owned(), "success")
 }
 
 pub async fn delete_user(token: CsrfToken) -> Result<Response, AppError> {
@@ -148,7 +152,7 @@ pub async fn delete_user_action(
         return render_delete_user(
             token,
             identity,
-            "Informe um ID ou e-mail valido.".to_owned(),
+            "Enter a valid ID or email address.".to_owned(),
             "error",
         );
     }
@@ -161,33 +165,23 @@ pub async fn delete_user_action(
         return render_delete_user(
             token,
             identity,
-            "Informe um ID numerico ou e-mail valido.".to_owned(),
+            "Enter a numeric ID or a valid email address.".to_owned(),
             "error",
         );
     };
     let Some(target) = target else {
-        return render_delete_user(
-            token,
-            identity,
-            "Usuario nao encontrado.".to_owned(),
-            "error",
-        );
+        return render_delete_user(token, identity, "User not found.".to_owned(), "error");
     };
     if auth::authenticated_user_id(&session).await? == Some(target.id_user) {
         return render_delete_user(
             token,
             identity,
-            "O administrador ativo nao pode remover a propria conta.".to_owned(),
+            "The signed-in administrator cannot remove their own account.".to_owned(),
             "error",
         );
     }
     repository.delete_by_id(target.id_user).await?;
-    render_delete_user(
-        token,
-        String::new(),
-        "Usuario removido do contexto.".to_owned(),
-        "error",
-    )
+    render_delete_user(token, String::new(), "User removed.".to_owned(), "error")
 }
 
 pub async fn edit_user(token: CsrfToken) -> Result<Response, AppError> {
@@ -205,11 +199,11 @@ pub async fn edit_user_lookup(
     let id_user = match sanitize::plain_text(&form.id_user).parse::<i32>() {
         Ok(id_user) if id_user > 0 => id_user,
         _ => {
-            return render_edit_search(token, "Informe um ID valido.".to_owned(), "error");
+            return render_edit_search(token, "Enter a valid ID.".to_owned(), "error");
         }
     };
     let Some(operator) = repository(&state).find_by_id(id_user).await? else {
-        return render_edit_search(token, "Usuario nao encontrado.".to_owned(), "error");
+        return render_edit_search(token, "User not found.".to_owned(), "error");
     };
     render_edit_operator(token, operator, String::new(), "")
 }
@@ -225,11 +219,11 @@ pub async fn update_user_action(
     }
     let id_user = match sanitize::plain_text(&form.id_user).parse::<i32>() {
         Ok(id_user) if id_user > 0 => id_user,
-        _ => return render_edit_search(token, "ID de usuario invalido.".to_owned(), "error"),
+        _ => return render_edit_search(token, "Invalid user ID.".to_owned(), "error"),
     };
     let repository = repository(&state);
     let Some(existing) = repository.find_by_id(id_user).await? else {
-        return render_edit_search(token, "Usuario nao encontrado.".to_owned(), "error");
+        return render_edit_search(token, "User not found.".to_owned(), "error");
     };
     let input = match validate_operator(
         &state,
@@ -248,7 +242,7 @@ pub async fn update_user_action(
         return render_edit_operator(
             token,
             existing,
-            "O administrador ativo nao pode alterar o proprio tipo.".to_owned(),
+            "The signed-in administrator cannot change their own role.".to_owned(),
             "error",
         );
     }
@@ -260,7 +254,7 @@ pub async fn update_user_action(
         return render_edit_operator(
             token,
             existing,
-            "O e-mail informado ja existe.".to_owned(),
+            "That email address is already registered.".to_owned(),
             "error",
         );
     }
@@ -272,7 +266,7 @@ pub async fn update_user_action(
         return render_edit_operator(
             token,
             existing,
-            "O username informado ja existe.".to_owned(),
+            "That username is already taken.".to_owned(),
             "error",
         );
     }
@@ -290,7 +284,7 @@ pub async fn update_user_action(
     render_edit_operator(
         token,
         updated,
-        "Dados do usuario atualizados com sucesso.".to_owned(),
+        "User details updated successfully.".to_owned(),
         "success",
     )
 }
@@ -373,7 +367,7 @@ pub async fn update_password_action(
             token,
             existing,
             true,
-            "O ID enviado nao pertence a sessao autenticada.".to_owned(),
+            "The submitted ID does not match the signed-in session.".to_owned(),
             "error",
         );
     }
@@ -392,7 +386,7 @@ pub async fn update_password_action(
         token,
         updated,
         false,
-        "Password alterada com sucesso.".to_owned(),
+        "Password changed successfully.".to_owned(),
         "success",
     )
 }
@@ -416,13 +410,13 @@ fn validate_operator(
     let email = sanitize::plain_text(raw_email).to_ascii_lowercase();
     let operator_type = sanitize::plain_text(raw_operator_type).to_ascii_lowercase();
     if !valid_username(&username) {
-        return Err("Username deve ter de 3 a 32 caracteres seguros.".to_owned());
+        return Err("The username must be 3 to 32 safe characters.".to_owned());
     }
     if !valid_email(&email) {
-        return Err("E-mail invalido ou maior que 128 caracteres.".to_owned());
+        return Err("The email address is invalid or longer than 128 characters.".to_owned());
     }
     if !matches!(operator_type.as_str(), "admin" | "operator" | "auditor") {
-        return Err("User type invalido.".to_owned());
+        return Err("Invalid user type.".to_owned());
     }
     let password = if raw_password.is_empty() && password_optional {
         None
@@ -459,7 +453,7 @@ pub(crate) fn valid_email(email: &str) -> bool {
 }
 
 fn password_example() -> String {
-    "Senha fraca. Use ao menos 14 caracteres, maiuscula, minuscula, numero e simbolo. Exemplo estrutural: Mais-De-14!Caracteres9.".to_owned()
+    "Weak password. Use at least 14 characters with upper- and lower-case letters, a number and a symbol. For example: More-Than-14!Characters9.".to_owned()
 }
 
 fn password_is_acceptable(state: &AppState, password: &str, username: &str, email: &str) -> bool {

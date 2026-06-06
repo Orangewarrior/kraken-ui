@@ -38,7 +38,7 @@ pub struct CsrfForm {
 
 pub async fn login_page(token: CsrfToken, session: Session) -> Result<Response, AppError> {
     if authenticated_operator_type(&session).await?.as_deref() == Some("admin") {
-        return Ok(Redirect::to("/kraken_ui/auth/painel_admin").into_response());
+        return Ok(Redirect::to("/kraken_ui/auth/admin_panel").into_response());
     }
     login_response(token, "").await
 }
@@ -120,7 +120,7 @@ pub async fn login_submit(
         .await
         .map_err(|error| AppError::internal(anyhow!("failed to persist operator type: {error}")))?;
 
-    Ok(Redirect::to("/kraken_ui/auth/painel_admin").into_response())
+    Ok(Redirect::to("/kraken_ui/auth/admin_panel").into_response())
 }
 
 pub async fn logout(

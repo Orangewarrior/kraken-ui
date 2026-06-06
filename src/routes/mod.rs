@@ -13,7 +13,7 @@ use crate::{
 
 pub fn create(state: AppState) -> Router {
     let protected_routes = Router::new()
-        .route("/kraken_ui/auth/painel_admin", get(dashboard::get))
+        .route("/kraken_ui/auth/admin_panel", get(dashboard::get))
         .route("/kraken_ui/auth/dashboard", get(dashboard::get))
         .route("/kraken_ui/auth/api/dashboard", get(dashboard::api))
         .route("/kraken_ui/auth/insert_user", get(acl::insert_user))
@@ -51,7 +51,7 @@ pub fn create(state: AppState) -> Router {
         .route("/login", get(|| async { Redirect::to("/kraken_ui/login") }))
         .route(
             "/dashboard",
-            get(|| async { Redirect::to("/kraken_ui/auth/painel_admin") }),
+            get(|| async { Redirect::to("/kraken_ui/auth/admin_panel") }),
         )
         .route("/kraken_ui/login", get(auth::login_page))
         .route("/kraken_ui/test_login", post(auth::login_submit))
