@@ -11,7 +11,8 @@ inline JavaScript.
 
 - **Secure by default.** TLS is mandatory, sessions and CSRF cookies use the
   `__Host-` prefix, and a strict Content-Security-Policy forbids inline
-  scripts and styles.
+  scripts and styles. Logins are rate-limited, timing-equalised, and sessions
+  are persisted and revocable.
 - **Defence in depth on passwords.** Argon2id hashing (libsodium-compatible)
   wrapped in an XChaCha20-Poly1305 envelope with a per-user AAD, so a hash can
   never be replayed against another account.
@@ -68,6 +69,13 @@ keys that are readable by group or others):
 openssl rand -base64 32 > /secure/path/kraken-ui-password.key
 chmod 600 /secure/path/kraken-ui-password.key
 export KRAKEN_UI_PASSWORD_KEY_FILE=/secure/path/kraken-ui-password.key
+```
+
+In production, also set a **stable session signing key** (≥ 64 bytes, Base64) so
+sessions survive restarts and validate across replicas:
+
+```bash
+export KRAKEN_UI_SESSION_KEY="$(openssl rand -base64 64)"
 ```
 
 **3. Create the first administrator** and run the app:

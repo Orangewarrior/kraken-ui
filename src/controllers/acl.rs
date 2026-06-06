@@ -58,6 +58,7 @@ pub struct UpdateUserForm {
 #[derive(Deserialize)]
 pub struct UpdatePasswordForm {
     id_user: String,
+    current_password: String,
     password: String,
     csrf_token: String,
 }
@@ -120,7 +121,7 @@ pub async fn insert_user_action(
     {
         return render_add_user(token, "That username is already taken.".to_owned(), "error");
     }
-    repository
+    let created = repository
         .create(NewOperator {
             username: &input.username,
             email: &input.email,
@@ -131,6 +132,7 @@ pub async fn insert_user_action(
                 .ok_or_else(|| AppError::internal(anyhow!("validated password is missing")))?,
         })
         .await?;
+    audit_operator_event("create", created.id_user, &created.username);
     render_add_user(token, "User created successfully.".to_owned(), "success")
 }
 
@@ -181,6 +183,7 @@ pub async fn delete_user_action(
         );
     }
     repository.delete_by_id(target.id_user).await?;
+    audit_operator_event("delete", target.id_user, &target.username);
     render_delete_user(token, String::new(), "User removed.".to_owned(), "error")
 }
 
@@ -281,6 +284,7 @@ pub async fn update_user_action(
             },
         )
         .await?;
+    audit_operator_event("update", updated.id_user, &updated.username);
     render_edit_operator(
         token,
         updated,
@@ -371,17 +375,30 @@ pub async fn update_password_action(
             "error",
         );
     }
+    // Re-authenticate with the current password before allowing a change, so a
+    // hijacked session cannot silently lock out the owner.
+    if !verify_current_password(&state, &existing, &form.current_password).await? {
+        return render_password(
+            token,
+            existing,
+            true,
+            "The current password is incorrect.".to_owned(),
+            "error",
+        );
+    }
     if sanitize::secret_has_rejected_markup(&form.password) {
         return render_password(token, existing, true, password_example(), "error");
     }
     if !password_is_acceptable(&state, &form.password, &existing.username, &existing.email) {
         return render_password(token, existing, true, password_example(), "error");
     }
+    let username = existing.username.clone();
     let updated = repository.update_password(existing, &form.password).await;
     let updated = match updated {
         Ok(updated) => updated,
         Err(error) => return Err(AppError::internal(error)),
     };
+    audit_operator_event("password_change", authenticated_id, &username);
     render_password(
         token,
         updated,
@@ -454,6 +471,35 @@ pub(crate) fn valid_email(email: &str) -> bool {
 
 fn password_example() -> String {
     "Weak password. Use at least 14 characters with upper- and lower-case letters, a number and a symbol. For example: More-Than-14!Characters9.".to_owned()
+}
+
+async fn verify_current_password(
+    state: &AppState,
+    operator: &crate::models::operator::Model,
+    current_password: &str,
+) -> Result<bool, AppError> {
+    let crypto = state.password_crypto.clone();
+    let user_id = operator.id_user;
+    let record = operator.encrypted_password_hash.clone();
+    let candidate = current_password.to_owned();
+    let verification =
+        tokio::task::spawn_blocking(move || crypto.verify_password(user_id, &record, &candidate))
+            .await
+            .map_err(|error| {
+                AppError::internal(anyhow!("password verification task failed: {error}"))
+            })??;
+    Ok(verification.valid)
+}
+
+fn audit_operator_event(action: &str, id_user: i32, username: &str) {
+    tracing::info!(
+        target: "audit",
+        event = "operator",
+        action = %action,
+        id_user,
+        username = %username,
+        "operator administration action"
+    );
 }
 
 fn password_is_acceptable(state: &AppState, password: &str, username: &str, email: &str) -> bool {

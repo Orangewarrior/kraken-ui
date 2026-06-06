@@ -21,6 +21,18 @@ behind them. For a running list of known gaps and proposed improvements, see
 - **A strict CSP.** Inline scripts and styles are forbidden. The local
   JavaScript never uses `innerHTML`, which keeps it compatible with Trusted
   Types.
+- **Login throttling.** Failed logins are rate-limited per source IP and per
+  account; reaching the threshold locks the key for a cool-off period. Unknown
+  usernames trigger a dummy verification so login timing does not reveal whether
+  an account exists.
+- **Persistent, revocable sessions.** Sessions are stored in SQLite and signed
+  with a stable key (see *Keys*), so they survive restarts and can be revoked by
+  deleting the row.
+- **No caching of admin pages.** Authenticated responses send
+  `Cache-Control: no-store`.
+- **Audit trail.** Structured events on the `audit` tracing target record login
+  outcomes, logout, the `first_time` bootstrap and operator administration —
+  never including secrets.
 - **Privacy-preserving logs.** Logs are JSONL, and events never include a
   password, hash, CSRF token or session contents.
 
@@ -44,6 +56,11 @@ If no administrator exists, the application reads `KRAKEN_UI_ADMIN_PASSWORD`
 and `KRAKEN_UI_ADMIN_EMAIL`. The password must be at least 14 characters and
 include upper- and lower-case letters, a number and a symbol, with no spaces
 and without containing the username.
+
+Alternatively, the one-shot `first_time` endpoint accepts a single loopback POST
+while the operators table is empty. It rejects requests that carry proxy
+forwarding headers, and when `KRAKEN_UI_FIRST_TIME_TOKEN` is set it additionally
+requires that token (sent as a `token` form field, compared in constant time).
 
 ## The password envelope
 
@@ -74,5 +91,16 @@ generates and persists a fresh envelope.
 - `KRAKEN_UI_PASSWORD_KEY_ID` — an ASCII identifier of up to 16 bytes
   (default `primary-v1`).
 
-The application will not start without a key source. The key never reaches the
-database, templates, sessions or logs.
+The application will not start without a password key source. The key never
+reaches the database, templates, sessions or logs.
+
+### Session signing key
+
+- `KRAKEN_UI_SESSION_KEY` — a Base64 key of at least 64 bytes used to sign
+  session cookies.
+- `KRAKEN_UI_SESSION_KEY_FILE` — a file containing that Base64 key; on Unix it
+  must not be readable by group or others.
+
+Generate one with `openssl rand -base64 64`. If neither is set, an ephemeral key
+is generated and a warning is logged — acceptable for development only, since
+sessions would then not survive a restart or work across replicas.

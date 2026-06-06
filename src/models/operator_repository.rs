@@ -4,9 +4,12 @@ use anyhow::Context;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, Condition, DatabaseConnection, EntityTrait,
     IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
+    sea_query::LikeExpr,
 };
 
-use crate::{models::operator, services::password_crypto::PasswordCryptoService};
+use crate::{
+    models::operator, security::sanitize, services::password_crypto::PasswordCryptoService,
+};
 
 #[derive(Clone)]
 pub struct OperatorRepository {
@@ -207,9 +210,10 @@ impl OperatorRepository {
             .context("failed to count operators")?;
         let mut query = operator::Entity::find();
         if !search.is_empty() {
+            let pattern = like_contains(search);
             let mut condition = Condition::any()
-                .add(operator::Column::Username.contains(search))
-                .add(operator::Column::Email.contains(search));
+                .add(operator::Column::Username.like(pattern.clone()))
+                .add(operator::Column::Email.like(pattern));
             if let Ok(id_user) = search.parse::<i32>() {
                 condition = condition.add(operator::Column::IdUser.eq(id_user));
             }
@@ -243,6 +247,13 @@ async fn encrypt_password(
     tokio::task::spawn_blocking(move || password_crypto.encrypt_password(user_id, &password))
         .await
         .context("password encryption task failed")?
+}
+
+/// Builds a substring `LIKE` pattern whose user-supplied part is escaped, so
+/// `%` and `_` in the search term are matched literally rather than as
+/// wildcards.
+fn like_contains(search: &str) -> LikeExpr {
+    LikeExpr::new(format!("%{}%", sanitize::escape_like(search))).escape('\\')
 }
 
 pub fn current_timestamp() -> String {

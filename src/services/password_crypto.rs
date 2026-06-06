@@ -19,6 +19,8 @@ const KEY_ID_BYTES: usize = 16;
 const NONCE_BYTES: usize = 24;
 const TAG_BYTES: usize = 16;
 const AAD_PREFIX: &str = "kraken_ui:v1:user:";
+const DUMMY_USER_ID: i32 = 0;
+const DUMMY_PASSWORD: &str = "kraken-ui::timing-equaliser::v1";
 
 pub trait PasswordCryptoService: Send + Sync {
     fn encrypt_password(&self, user_id: i32, password: &str) -> anyhow::Result<String>;
@@ -28,6 +30,13 @@ pub trait PasswordCryptoService: Send + Sync {
         encrypted_record: &str,
         password: &str,
     ) -> anyhow::Result<PasswordVerification>;
+
+    /// Runs a verification of equivalent cost against a throwaway record so that
+    /// a login attempt for a non-existent account takes the same time as one for
+    /// a real account. This closes the username-enumeration timing side channel.
+    ///
+    /// The default is a no-op, which is appropriate for in-test doubles.
+    fn run_dummy_verification(&self, _password: &str) {}
 }
 
 #[derive(Debug, PartialEq)]
@@ -39,6 +48,7 @@ pub struct PasswordVerification {
 pub struct DryocPasswordCryptoService {
     key_id: [u8; KEY_ID_BYTES],
     key: Zeroizing<[u8; KEY_BYTES]>,
+    dummy_record: String,
 }
 
 impl DryocPasswordCryptoService {
@@ -63,10 +73,15 @@ impl DryocPasswordCryptoService {
         let key_array: [u8; KEY_BYTES] = key_bytes.try_into().map_err(|_| {
             anyhow::anyhow!("password encryption key must decode to exactly {KEY_BYTES} bytes")
         })?;
-        Ok(Self {
+        let mut service = Self {
             key_id: normalize_key_id(key_id)?,
             key: Zeroizing::new(key_array),
-        })
+            dummy_record: String::new(),
+        };
+        // Precompute a real encrypted Argon2id record once, so the dummy
+        // verification path has the same cost as a genuine one.
+        service.dummy_record = service.encrypt_password(DUMMY_USER_ID, DUMMY_PASSWORD)?;
+        Ok(service)
     }
 
     fn encrypt_hash(&self, user_id: i32, hash_record: &str) -> anyhow::Result<String> {
@@ -161,6 +176,11 @@ impl PasswordCryptoService for DryocPasswordCryptoService {
             valid: true,
             replacement_record,
         })
+    }
+
+    fn run_dummy_verification(&self, password: &str) {
+        // The result is intentionally discarded; only the timing matters.
+        let _ = self.verify_password(DUMMY_USER_ID, &self.dummy_record, password);
     }
 }
 

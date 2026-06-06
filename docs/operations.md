@@ -21,6 +21,27 @@ A practical guide to configuring and running Kraken UI.
 Relative paths are resolved from the working directory the process is started
 in.
 
+## Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `KRAKEN_UI_PASSWORD_KEY` / `KRAKEN_UI_PASSWORD_KEY_FILE` | The 32-byte (Base64) key that encrypts password hashes. Required. |
+| `KRAKEN_UI_PASSWORD_KEY_ID` | Key identifier, default `primary-v1`. |
+| `KRAKEN_UI_SESSION_KEY` / `KRAKEN_UI_SESSION_KEY_FILE` | The ≥ 64-byte (Base64) cookie signing key. Strongly recommended in production; an ephemeral key is used if unset. |
+| `KRAKEN_UI_ADMIN_PASSWORD` / `KRAKEN_UI_ADMIN_EMAIL` | Bootstrap the first administrator at start-up. |
+| `KRAKEN_UI_FIRST_TIME_TOKEN` | Optional shared secret required by the `first_time` endpoint, in addition to the loopback check. |
+| `RUST_LOG` | Log level filter. |
+
+Key files referenced by `*_KEY_FILE` must not be readable by group or others on
+Unix, or the application refuses to start.
+
+## WAF metrics trust
+
+The metrics client connects to `waf-endpoint` over HTTPS. Set `waf-cert-ca` to
+the CA the WAF presents. If it is left unset, the UI falls back to its own
+`cert-ca` and logs a warning at start-up; this only works if both services share
+a CA, so prefer setting it explicitly.
+
 ## Database
 
 The default path is `db/kraken-ui.sqlite`. The `operators` table is created

@@ -60,7 +60,6 @@ jobs:
   cargo-audit:
     name: SCA - cargo-audit
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - run: cargo install cargo-audit --locked

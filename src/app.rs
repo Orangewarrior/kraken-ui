@@ -1,12 +1,13 @@
-use std::{env, fs, sync::Arc};
+use std::{env, fs, path::Path, sync::Arc};
 
 use anyhow::{Context, bail};
 use axum::{Router, middleware};
 use axum_csrf::{CsrfConfig, CsrfLayer, SameSite};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use time::Duration;
 use tower_http::trace::TraceLayer;
 use tower_sessions::{
-    Expiry, MemoryStore, SessionManagerLayer,
+    Expiry, SessionManagerLayer,
     cookie::{Key, SameSite as SessionSameSite},
 };
 use tracing::{info, warn};
@@ -19,11 +20,13 @@ use crate::{
     models::{
         database,
         operator_repository::{NewOperator, OperatorRepository},
+        session_store::SeaOrmSessionStore,
     },
     routes,
     security::{
         headers,
         password::{MediumOrStrongPasswordPolicy, PasswordPolicy},
+        rate_limit::LoginThrottle,
         sanitize,
     },
     services::{
@@ -81,6 +84,12 @@ impl AppFactory {
         let waf_metrics = match self.waf_metrics {
             Some(service) => service,
             None => {
+                if self.config.waf_certificate_path.is_none() {
+                    warn!(
+                        "waf-cert-ca is not set; trusting the UI's own cert-ca for the WAF metrics \
+                         channel. Set waf-cert-ca explicitly if KrakenWAF presents a different CA."
+                    );
+                }
                 WafMetricsService::new(
                     &self.config.waf_endpoint,
                     self.config.waf_certificate_path(),
@@ -89,6 +98,7 @@ impl AppFactory {
             }
         };
         let security_headers = headers::load("conf/headers_sec.txt").await?;
+        let session_store = SeaOrmSessionStore::new(database.clone()).await?;
         let state = AppState {
             config: Arc::new(self.config.clone()),
             database,
@@ -97,19 +107,20 @@ impl AppFactory {
             password_policy,
             password_crypto,
             waf_metrics,
+            login_throttle: Arc::new(LoginThrottle::with_defaults()),
             first_time_lock: Arc::new(tokio::sync::Mutex::new(())),
         };
 
         let session_minutes = i64::try_from(self.config.session_timeout_minutes)
             .context("session timeout does not fit in i64")?;
-        let session_layer = SessionManagerLayer::new(MemoryStore::default())
+        let session_layer = SessionManagerLayer::new(session_store)
             .with_name("__Host-kraken_session")
             .with_path("/")
             .with_http_only(true)
             .with_secure(true)
             .with_same_site(SessionSameSite::Strict)
             .with_expiry(Expiry::OnInactivity(Duration::minutes(session_minutes)))
-            .with_signed(Key::generate());
+            .with_signed(load_session_signing_key()?);
         let csrf_config = CsrfConfig::default()
             .with_cookie_name("kraken_csrf")
             .with_cookie_path("/")
@@ -128,6 +139,57 @@ impl AppFactory {
             ));
         Ok(application)
     }
+}
+
+/// Loads the cookie signing key from `KRAKEN_UI_SESSION_KEY` or
+/// `KRAKEN_UI_SESSION_KEY_FILE` (Base64, at least 64 bytes). A stable key lets
+/// sessions survive a restart and be validated across replicas. If no source is
+/// configured, an ephemeral key is generated with a warning — acceptable for
+/// development only.
+fn load_session_signing_key() -> anyhow::Result<Key> {
+    let encoded = match env::var("KRAKEN_UI_SESSION_KEY") {
+        Ok(value) => Some(value),
+        Err(_) => match env::var("KRAKEN_UI_SESSION_KEY_FILE") {
+            Ok(path) => Some(read_protected_file(Path::new(&path))?),
+            Err(_) => None,
+        },
+    };
+    match encoded {
+        Some(value) => {
+            let bytes = STANDARD
+                .decode(value.trim())
+                .context("KRAKEN_UI_SESSION_KEY must be valid base64")?;
+            if bytes.len() < 64 {
+                bail!("session signing key must decode to at least 64 bytes");
+            }
+            Ok(Key::from(&bytes))
+        }
+        None => {
+            warn!(
+                "no session signing key configured; generating an ephemeral one. Sessions will not \
+                 survive a restart or work across replicas. Set KRAKEN_UI_SESSION_KEY or \
+                 KRAKEN_UI_SESSION_KEY_FILE in production."
+            );
+            Ok(Key::generate())
+        }
+    }
+}
+
+fn read_protected_file(path: &Path) -> anyhow::Result<String> {
+    let metadata = fs::metadata(path)
+        .with_context(|| format!("unable to read key metadata from {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            bail!(
+                "session key file {} must not be accessible by group or others",
+                path.display()
+            );
+        }
+    }
+    let _ = &metadata;
+    fs::read_to_string(path).with_context(|| format!("unable to read key file {}", path.display()))
 }
 
 pub fn initialize_logging(config: &AppConfig) -> anyhow::Result<WorkerGuard> {
