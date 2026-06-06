@@ -1,27 +1,40 @@
-# Operação
+# Operations
 
-## Configuração
+A practical guide to configuring and running Kraken UI.
 
-O arquivo `conf/setup.yaml` aceita:
+## Configuration
 
-- `cert-ca`: certificado ou cadeia PEM apresentada pelo servidor.
-- `key`: chave privada PEM correspondente.
-- `listen`: endereço e porta HTTPS.
-- `db-local`: banco SQLite da interface.
-- `waf-endpoint`: endpoint HTTPS do KrakenWAF.
-- `log-dir`: diretório dos logs JSONL.
-- `session-timeout-minutes`: expiração por inatividade, entre 5 e 1440 minutos.
+`conf/setup.yaml` accepts the following keys:
 
-Paths relativos são resolvidos a partir do diretório de execução.
+| Key | Meaning |
+|-----|---------|
+| `cert-ca` | The PEM certificate or chain the server presents. |
+| `key` | The matching PEM private key. |
+| `listen` | The HTTPS address and port to bind. |
+| `db-local` | The UI's own SQLite database. |
+| `db_local` | The KrakenWAF alerts database (opened read-only). |
+| `waf-endpoint` | The KrakenWAF HTTPS metrics endpoint. |
+| `waf-cert-ca` | The PEM to trust when the WAF presents its own certificate. |
+| `log-dir` | The directory for the JSONL logs. |
+| `session-timeout-minutes` | Idle expiry, between 5 and 1440 minutes. |
 
-## Banco de dados
+Relative paths are resolved from the working directory the process is started
+in.
 
-O caminho padrão é `db/kraken-ui.sqlite`. A tabela `operators` é criada automaticamente. Consulte `docs/database.md` para schema e endpoints.
+## Database
 
-## Headers
+The default path is `db/kraken-ui.sqlite`. The `operators` table is created
+automatically on first start. See [database.md](database.md) for the schema and
+the full route list.
 
-Cada linha de `conf/headers_sec.txt` usa o formato `Nome: valor`. O arquivo é validado na inicialização. Uma linha inválida impede o servidor de iniciar, evitando operação sem hardening.
+## Security headers
+
+Each line of `conf/headers_sec.txt` uses the `Name: value` format. The file is
+validated at start-up, and a single invalid line stops the server from
+starting — this is deliberate, so the application can never run without its
+hardening headers in place.
 
 ## Logs
 
-O arquivo padrão é `log/kraken-ui.jsonl`. Use `RUST_LOG` para ajustar níveis, sem habilitar logs de payload em produção.
+The default log file is `log/kraken-ui.jsonl`. Use `RUST_LOG` to adjust levels,
+but do not enable payload logging in production.

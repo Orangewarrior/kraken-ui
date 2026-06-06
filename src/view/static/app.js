@@ -462,7 +462,7 @@
       if (form.getAttribute("data-confirm-ready") === "true") return;
       form.setAttribute("data-confirm-ready", "true");
       form.addEventListener("submit", (event) => {
-        if (!window.confirm("Tem certeza que deseja apagar a conta?")) {
+        if (!window.confirm("Are you sure you want to delete this account?")) {
           event.preventDefault();
         }
       });
@@ -482,7 +482,7 @@
     const usable = values.filter((item) => Number(item.value) > 0);
     const total = usable.reduce((sum, item) => sum + Number(item.value), 0);
     if (total <= 0) {
-      root.textContent = "Sem deteccoes CMC no banco.";
+      root.textContent = "No CMC detections in the database.";
       legendRoot.replaceChildren();
       return;
     }
@@ -523,7 +523,7 @@
     if (!root) return;
     const usable = values.filter((item) => Number(item.value) > 0).slice(0, 12);
     if (usable.length === 0) {
-      root.textContent = "Metricas por modulo indisponiveis.";
+      root.textContent = "Per-module metrics are unavailable.";
       return;
     }
     const width = 760;
@@ -547,7 +547,7 @@
   const renderRank = (root, values) => {
     if (!root) return;
     if (!Array.isArray(values) || values.length === 0) {
-      root.textContent = "Sem dados.";
+      root.textContent = "No data.";
       return;
     }
     root.replaceChildren(...values.map((item, index) => {
@@ -592,7 +592,7 @@
       });
       if (errorRoot && (!data.metrics_available || !data.database_available)) {
         errorRoot.hidden = false;
-        errorRoot.textContent = "Parte da observabilidade esta indisponivel. Verifique waf_endpoint, certificado e db_local.";
+        errorRoot.textContent = "Some observability data is unavailable. Check waf_endpoint, the certificate and db_local.";
       }
       drawPie(qs("[data-cmc-pie]"), qs("[data-cmc-legend]"), data.cmc_detections || []);
       drawBars(qs("[data-module-bars]"), data.module_blocks || []);
@@ -601,7 +601,7 @@
     } catch (_error) {
       if (errorRoot) {
         errorRoot.hidden = false;
-        errorRoot.textContent = "Nao foi possivel carregar os dados do dashboard.";
+        errorRoot.textContent = "Unable to load the dashboard data.";
       }
     }
   };

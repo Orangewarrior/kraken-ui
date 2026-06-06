@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>KrakenWAF - Usuarios</title><link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>KrakenWAF - Users</title><link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script></head>
 <body data-page="users"><div class="shell admin-shell">{% include "admin_sidebar.html" %}<main class="page admin-content">
-  <section class="page-hero compact-hero"><span class="badge">ACL</span><h1>Tabela de usuarios</h1><p class="lead">Pesquisa e paginacao executadas no SQLite via AJAX, 50 registros por pagina.</p></section>
+  <section class="page-hero compact-hero"><span class="badge">ACL</span><h1>Users table</h1><p class="lead">Search and pagination run against SQLite over AJAX, 50 records per page.</p></section>
   <section class="table-card">
-    <div class="table-toolbar"><h2>Operators</h2><label class="table-search"><span>Search</span><input type="search" data-kw-table-search="operators-table" autocomplete="off" placeholder="ID, username ou e-mail"></label></div>
-    <div class="table-scroll"><table id="operators-table" class="kw-table" data-kw-table data-table-kind="users" data-ajax-url="/kraken_ui/auth/api/operators" data-server-side="true" data-page-size="50" data-csrf-token="{{ csrf_token }}"><thead><tr><th>ID</th><th>Username</th><th>E-mail</th><th>Type</th><th>Status</th><th>Created</th><th>Edit</th><th>Delete</th></tr></thead><tbody></tbody></table></div>
-    <div class="table-footer"><button type="button" class="ghost-button" data-kw-table-prev="operators-table">Anterior</button><span data-kw-table-info="operators-table">Loading...</span><button type="button" class="ghost-button" data-kw-table-next="operators-table">Proxima</button></div>
+    <div class="table-toolbar"><h2>Operators</h2><label class="table-search"><span>Search</span><input type="search" data-kw-table-search="operators-table" autocomplete="off" placeholder="ID, username or email"></label></div>
+    <div class="table-scroll"><table id="operators-table" class="kw-table" data-kw-table data-table-kind="users" data-ajax-url="/kraken_ui/auth/api/operators" data-server-side="true" data-page-size="50" data-csrf-token="{{ csrf_token }}"><thead><tr><th>ID</th><th>Username</th><th>Email</th><th>Type</th><th>Status</th><th>Created</th><th>Edit</th><th>Delete</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-footer"><button type="button" class="ghost-button" data-kw-table-prev="operators-table">Previous</button><span data-kw-table-info="operators-table">Loading...</span><button type="button" class="ghost-button" data-kw-table-next="operators-table">Next</button></div>
   </section>
 </main></div></body></html>

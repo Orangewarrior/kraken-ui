@@ -1,6 +1,6 @@
 # KrakenWaf Axum + Askama schema
 
-## Estrutura
+## Structure
 
 ```text
 axum_schema/
@@ -14,13 +14,13 @@ axum_schema/
     └── dashboard.html
 ```
 
-## Rodar
+## Running
 
 ```bash
 cargo run
 ```
 
-Depois acesse:
+Then open:
 
 ```text
 http://127.0.0.1:3000/
@@ -29,9 +29,9 @@ http://127.0.0.1:3000/api/alerts
 http://127.0.0.1:3000/api/metrics/summary
 ```
 
-## Segurança
+## Security
 
-O exemplo aplica headers via `tower-http`:
+The example applies headers via `tower-http`:
 
 ```text
 Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests
@@ -40,17 +40,17 @@ Referrer-Policy: no-referrer
 Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
 ```
 
-## Integração real
+## Real integration
 
-Troque os dados mockados em `src/main.rs` por queries reais do KrakenWaf.
+Replace the mocked data in `src/main.rs` with real KrakenWaf queries.
 
-Recomendações:
+Recommendations:
 
-- Faça paginação server-side real em `/api/alerts`.
-- Normalize logs antes de renderizar.
-- Nunca injete HTML vindo de logs, regras ou requests.
-- Use tipos fortes para severidade, ação e status.
-- Para produção, sirva por TLS atrás do seu reverse proxy/WAF.
+- Implement real server-side pagination for `/api/alerts`.
+- Normalise logs before rendering them.
+- Never inject HTML coming from logs, rules or requests.
+- Use strong types for severity, action and status.
+- For production, serve over TLS behind your reverse proxy/WAF.
 
 
 ## Local PNG assets

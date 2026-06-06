@@ -1,4 +1,4 @@
-# Banco de dados e ACL
+# Database and ACL
 
 ## Schema
 
@@ -15,41 +15,45 @@ CREATE TABLE operators (
 );
 ```
 
-Além da unicidade de e-mail solicitada, `username` também é único para tornar a autenticação determinística.
+Beyond the unique email that was requested, `username` is unique too, which
+makes authentication deterministic.
 
-## Rotas públicas
+## Public routes
 
-- `GET /kraken_ui/login`: formulário de login.
-- `POST /kraken_ui/test_login`: valida CSRF, busca o operador, chama o serviço criptográfico e cria sessão somente para `admin`.
+- `GET /kraken_ui/login` — the login form.
+- `POST /kraken_ui/test_login` — validates CSRF, looks up the operator, calls
+  the crypto service and creates a session for `admin` accounts only.
+- `POST /kraken_ui/auth/first_time` — one-shot administrator bootstrap, limited
+  to loopback clients and closed once any operator exists.
+- `GET /health` — liveness check.
 
-## Rotas admin
+## Administrative routes
 
-- `GET /kraken_ui/auth/painel_admin`
-- `GET /kraken_ui/auth/acl`
-- `GET /kraken_ui/auth/acl/operators`
-- `GET|POST /kraken_ui/auth/acl/operators/add`
-- `GET|POST /kraken_ui/auth/acl/operators/edit/{id_user}`
-- `GET|POST /kraken_ui/auth/acl/operators/delete`
+These all require an `admin` session and are served under `/kraken_ui/auth`.
 
-## Endpoints administrativos atuais
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET  | `/admin_panel`, `/dashboard` | Dashboard view |
+| GET  | `/api/dashboard` | Dashboard JSON metrics |
+| GET  | `/insert_user` | Add-user form |
+| POST | `/insert_user_action` | Create an operator |
+| GET  | `/delete_user` | Remove-user form |
+| POST | `/delete_user_action` | Delete an operator |
+| GET / POST | `/edit_user` | Find an operator to edit |
+| POST | `/update_user_action` | Update an operator |
+| GET  | `/show_user_table` | Operators table |
+| GET  | `/api/operators` | Operators JSON (paginated) |
+| GET  | `/show_attacks` | Observed-attacks table |
+| GET  | `/api/attacks` | Attacks JSON (paginated) |
+| GET  | `/update_password` | Change-password form |
+| POST | `/update_password_action` | Change the current operator's password |
+| POST | `/logout` | Destroy the session |
 
-- `GET /kraken_ui/auth/insert_user`
-- `POST /kraken_ui/auth/insert_user_action`
-- `GET /kraken_ui/auth/delete_user`
-- `POST /kraken_ui/auth/delete_user_action`
-- `GET|POST /kraken_ui/auth/edit_user`
-- `POST /kraken_ui/auth/update_user_action`
-- `GET /kraken_ui/auth/show_user_table`
-- `GET /kraken_ui/auth/api/operators`
-- `GET /kraken_ui/auth/update_password`
-- `POST /kraken_ui/auth/update_password_action`
+Every mutation uses POST and a CSRF token. The JSON endpoints never return
+`encrypted_password_hash`.
 
-## Banco do KrakenWAF
+## The KrakenWAF database
 
-`db_local` aponta para `vulns_alert.db`. A UI abre esse arquivo em modo
-somente leitura e consulta `vulnerabilities` com filtros parametrizados para
-data, severidade, IP, país e título.
-- `GET /kraken_ui/auth/api/operators`
-- `POST /kraken_ui/auth/logout`
-
-Todas as mutações usam POST e CSRF. O endpoint JSON nunca retorna `encrypted_password_hash`.
+`db_local` points at `vulns_alert.db`. The UI opens this file **read-only** and
+queries `vulnerabilities` with parameterised filters for date, severity, IP,
+country and title — it can read the WAF's findings but never write to them.
