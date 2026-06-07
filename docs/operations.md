@@ -57,5 +57,22 @@ hardening headers in place.
 
 ## Logs
 
-The default log file is `log/kraken-ui.jsonl`. Use `RUST_LOG` to adjust levels,
-but do not enable payload logging in production.
+Two JSONL logs are written to `log-dir`:
+
+- `kraken-ui.jsonl` — the application log, governed by `RUST_LOG`.
+- `audit.jsonl` — a dedicated security audit trail of login outcomes, logout,
+  the `first_time` bootstrap and operator administration. It never contains
+  secrets and is written regardless of `RUST_LOG`.
+
+Do not enable payload logging in production.
+
+## Rate limiting
+
+Two limiters protect the service, both process-local:
+
+- A login throttle locks a source IP (and IP+account) after repeated failures.
+- A global per-IP request rate limiter (a generous token bucket) caps overall
+  request volume as defence in depth and returns `429 Too Many Requests` when
+  exceeded.
+
+For a multi-replica deployment these should be backed by a shared store.

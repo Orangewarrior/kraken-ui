@@ -123,6 +123,81 @@ fn prune(entries: &mut HashMap<String, Attempt>, now: Instant) {
     });
 }
 
+/// A per-key token-bucket rate limiter used as a global, defence-in-depth cap on
+/// request volume per client IP. It is deliberately generous: it exists to blunt
+/// floods, not to police normal admin use.
+#[derive(Debug)]
+pub struct IpRateLimiter {
+    buckets: Mutex<HashMap<String, Bucket>>,
+    capacity: f64,
+    refill_per_second: f64,
+}
+
+#[derive(Debug)]
+struct Bucket {
+    tokens: f64,
+    last_refill: Instant,
+}
+
+impl IpRateLimiter {
+    pub fn new(capacity: u32, refill_per_second: f64) -> Self {
+        Self {
+            buckets: Mutex::new(HashMap::new()),
+            capacity: f64::from(capacity),
+            refill_per_second,
+        }
+    }
+
+    /// A generous default: a burst of 300 requests, refilling at 5 per second.
+    pub fn with_defaults() -> Self {
+        Self::new(300, 5.0)
+    }
+
+    /// Consumes one token for `key`. Returns `true` if the request is allowed.
+    pub fn check(&self, key: &str) -> bool {
+        self.check_at(key, Instant::now())
+    }
+
+    fn check_at(&self, key: &str, now: Instant) -> bool {
+        let mut buckets = match self.buckets.lock() {
+            Ok(buckets) => buckets,
+            // Fail open rather than lock everyone out if the mutex is poisoned.
+            Err(_) => return true,
+        };
+        prune_buckets(&mut buckets, now, self.capacity, self.refill_per_second);
+
+        let bucket = buckets.entry(key.to_owned()).or_insert(Bucket {
+            tokens: self.capacity,
+            last_refill: now,
+        });
+        let elapsed = now.duration_since(bucket.last_refill).as_secs_f64();
+        bucket.tokens = (bucket.tokens + elapsed * self.refill_per_second).min(self.capacity);
+        bucket.last_refill = now;
+        if bucket.tokens >= 1.0 {
+            bucket.tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Drops buckets that have had time to refill completely and are therefore
+/// indistinguishable from a fresh one, keeping the map bounded.
+fn prune_buckets(
+    buckets: &mut HashMap<String, Bucket>,
+    now: Instant,
+    capacity: f64,
+    refill_per_second: f64,
+) {
+    let full_after = if refill_per_second > 0.0 {
+        Duration::from_secs_f64(capacity / refill_per_second)
+    } else {
+        Duration::from_secs(3600)
+    };
+    buckets.retain(|_, bucket| now.duration_since(bucket.last_refill) <= full_after);
+}
+
 #[cfg(test)]
 mod tests {
     use super::LoginThrottle;
@@ -155,5 +230,26 @@ mod tests {
         assert!(throttle.record_failure_at("ip", now).is_some());
         let later = now + Duration::from_secs(11);
         assert!(throttle.locked_for_at("ip", later).is_none());
+    }
+
+    use super::IpRateLimiter;
+
+    #[test]
+    fn rate_limiter_allows_a_burst_then_blocks() {
+        let limiter = IpRateLimiter::new(3, 1.0);
+        let now = Instant::now();
+        assert!(limiter.check_at("ip", now));
+        assert!(limiter.check_at("ip", now));
+        assert!(limiter.check_at("ip", now));
+        assert!(!limiter.check_at("ip", now));
+    }
+
+    #[test]
+    fn rate_limiter_refills_over_time() {
+        let limiter = IpRateLimiter::new(1, 1.0);
+        let now = Instant::now();
+        assert!(limiter.check_at("ip", now));
+        assert!(!limiter.check_at("ip", now));
+        assert!(limiter.check_at("ip", now + Duration::from_secs(1)));
     }
 }

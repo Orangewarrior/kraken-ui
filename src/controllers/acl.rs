@@ -11,16 +11,21 @@ use axum_csrf::CsrfToken;
 use memchr::{memchr, memrchr};
 use serde::{Deserialize, Serialize};
 use tower_sessions::Session;
+use zeroize::Zeroizing;
 
 use crate::{
-    controllers::auth,
+    controllers::{
+        auth,
+        pagination::{PageResponse, parse_query_u64},
+    },
     error::AppError,
     models::operator_repository::{NewOperator, OperatorRepository, UpdateOperator},
-    security::sanitize,
+    security::{csrf, sanitize},
+    services::password_crypto::spawn_verify,
     state::AppState,
     view::{
         AddUserTemplate, DeleteUserTemplate, EditUserTemplate, RoleOption, ShowUserTableTemplate,
-        UpdatePasswordTemplate, csrf_error_response, render,
+        UpdatePasswordTemplate, csrf_error_response, nav, render,
     },
 };
 
@@ -73,16 +78,6 @@ pub struct OperatorRow {
     created_at: String,
 }
 
-#[derive(Serialize)]
-pub struct OperatorPageResponse {
-    draw: u64,
-    #[serde(rename = "recordsTotal")]
-    records_total: u64,
-    #[serde(rename = "recordsFiltered")]
-    records_filtered: u64,
-    data: Vec<OperatorRow>,
-}
-
 pub async fn insert_user(token: CsrfToken) -> Result<Response, AppError> {
     render_add_user(token, String::new(), "")
 }
@@ -92,7 +87,7 @@ pub async fn insert_user_action(
     token: CsrfToken,
     Form(form): Form<OperatorForm>,
 ) -> Result<Response, AppError> {
-    if !valid_csrf(&token, &form.csrf_token) {
+    if !csrf::verify(&token, &form.csrf_token) {
         return Ok(csrf_error_response());
     }
     let input = match validate_operator(
@@ -146,7 +141,7 @@ pub async fn delete_user_action(
     session: Session,
     Form(form): Form<DeleteUserForm>,
 ) -> Result<Response, AppError> {
-    if !valid_csrf(&token, &form.csrf_token) {
+    if !csrf::verify(&token, &form.csrf_token) {
         return Ok(csrf_error_response());
     }
     let identity = sanitize::plain_text(&form.user_identity).to_ascii_lowercase();
@@ -196,7 +191,7 @@ pub async fn edit_user_lookup(
     token: CsrfToken,
     Form(form): Form<EditLookupForm>,
 ) -> Result<Response, AppError> {
-    if !valid_csrf(&token, &form.csrf_token) {
+    if !csrf::verify(&token, &form.csrf_token) {
         return Ok(csrf_error_response());
     }
     let id_user = match sanitize::plain_text(&form.id_user).parse::<i32>() {
@@ -217,7 +212,7 @@ pub async fn update_user_action(
     session: Session,
     Form(form): Form<UpdateUserForm>,
 ) -> Result<Response, AppError> {
-    if !valid_csrf(&token, &form.csrf_token) {
+    if !csrf::verify(&token, &form.csrf_token) {
         return Ok(csrf_error_response());
     }
     let id_user = match sanitize::plain_text(&form.id_user).parse::<i32>() {
@@ -295,7 +290,7 @@ pub async fn update_user_action(
 
 pub async fn show_user_table(token: CsrfToken) -> Result<Response, AppError> {
     render_with_csrf(token, |csrf_token| ShowUserTableTemplate {
-        active_page: "acl",
+        active_page: nav::ACL,
         csrf_token,
     })
 }
@@ -303,7 +298,7 @@ pub async fn show_user_table(token: CsrfToken) -> Result<Response, AppError> {
 pub async fn api_operators(
     State(state): State<AppState>,
     Query(query): Query<HashMap<String, String>>,
-) -> Result<Json<OperatorPageResponse>, AppError> {
+) -> Result<Json<PageResponse<OperatorRow>>, AppError> {
     let draw = parse_query_u64(&query, "draw", 1);
     let start = parse_query_u64(&query, "start", 0);
     let length = parse_query_u64(&query, "length", 50).clamp(1, 100);
@@ -325,7 +320,7 @@ pub async fn api_operators(
             created_at: operator.created_at,
         })
         .collect();
-    Ok(Json(OperatorPageResponse {
+    Ok(Json(PageResponse {
         draw,
         records_total: page.records_total,
         records_filtered: page.records_filtered,
@@ -353,7 +348,7 @@ pub async fn update_password_action(
     session: Session,
     Form(form): Form<UpdatePasswordForm>,
 ) -> Result<Response, AppError> {
-    if !valid_csrf(&token, &form.csrf_token) {
+    if !csrf::verify(&token, &form.csrf_token) {
         return Ok(csrf_error_response());
     }
     let Some(authenticated_id) = auth::authenticated_user_id(&session).await? else {
@@ -478,16 +473,14 @@ async fn verify_current_password(
     operator: &crate::models::operator::Model,
     current_password: &str,
 ) -> Result<bool, AppError> {
-    let crypto = state.password_crypto.clone();
-    let user_id = operator.id_user;
-    let record = operator.encrypted_password_hash.clone();
-    let candidate = current_password.to_owned();
-    let verification =
-        tokio::task::spawn_blocking(move || crypto.verify_password(user_id, &record, &candidate))
-            .await
-            .map_err(|error| {
-                AppError::internal(anyhow!("password verification task failed: {error}"))
-            })??;
+    let verification = spawn_verify(
+        state.password_crypto.clone(),
+        operator.id_user,
+        operator.encrypted_password_hash.clone(),
+        Zeroizing::new(current_password.to_owned()),
+    )
+    .await
+    .map_err(AppError::internal)?;
     Ok(verification.valid)
 }
 
@@ -515,18 +508,13 @@ fn repository(state: &AppState) -> OperatorRepository {
     OperatorRepository::new(state.database.clone(), state.password_crypto.clone())
 }
 
-fn valid_csrf(token: &CsrfToken, submitted_token: &str) -> bool {
-    sanitize::plain_text(submitted_token) == submitted_token
-        && token.verify(submitted_token).is_ok()
-}
-
 fn render_add_user(
     token: CsrfToken,
     message: String,
     message_class: &'static str,
 ) -> Result<Response, AppError> {
     render_with_csrf(token, |csrf_token| AddUserTemplate {
-        active_page: "acl",
+        active_page: nav::ACL,
         csrf_token,
         roles: role_options(None),
         show_form: message_class != "success",
@@ -542,7 +530,7 @@ fn render_delete_user(
     message_class: &'static str,
 ) -> Result<Response, AppError> {
     render_with_csrf(token, |csrf_token| DeleteUserTemplate {
-        active_page: "acl",
+        active_page: nav::ACL,
         csrf_token,
         user_identity,
         message,
@@ -556,7 +544,7 @@ fn render_edit_search(
     message_class: &'static str,
 ) -> Result<Response, AppError> {
     render_with_csrf(token, |csrf_token| EditUserTemplate {
-        active_page: "acl",
+        active_page: nav::ACL,
         csrf_token,
         has_user: false,
         id_user: 0,
@@ -576,7 +564,7 @@ fn render_edit_operator(
     message_class: &'static str,
 ) -> Result<Response, AppError> {
     render_with_csrf(token, |csrf_token| EditUserTemplate {
-        active_page: "acl",
+        active_page: nav::ACL,
         csrf_token,
         has_user: true,
         id_user: operator.id_user,
@@ -597,7 +585,7 @@ fn render_password(
     message_class: &'static str,
 ) -> Result<Response, AppError> {
     render_with_csrf(token, |csrf_token| UpdatePasswordTemplate {
-        active_page: "user_status",
+        active_page: nav::USER_STATUS,
         csrf_token,
         id_user: operator.id_user,
         username: operator.username,
@@ -633,12 +621,4 @@ fn role_options(selected: Option<&str>) -> Vec<RoleOption> {
         selected: selected == Some(value),
     })
     .collect()
-}
-
-fn parse_query_u64(query: &HashMap<String, String>, key: &str, fallback: u64) -> u64 {
-    query
-        .get(key)
-        .map(|value| sanitize::plain_text(value))
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(fallback)
 }

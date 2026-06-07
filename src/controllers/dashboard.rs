@@ -13,7 +13,7 @@ use crate::{
     models::vulnerability_repository::VulnerabilityRepository,
     services::waf_metrics::{ModuleMetric, WafMetricsSnapshot},
     state::AppState,
-    view::{DashboardTemplate, render},
+    view::{DashboardTemplate, nav, render},
 };
 
 #[derive(Serialize)]
@@ -39,7 +39,7 @@ pub async fn get(token: CsrfToken) -> Result<Response, AppError> {
         .authenticity_token()
         .map_err(|error| AppError::internal(anyhow!("failed to create CSRF token: {error}")))?;
     let response = render(DashboardTemplate {
-        active_page: "dashboard",
+        active_page: nav::DASHBOARD,
         csrf_token: authenticity_token,
     })?;
     Ok((token, response).into_response())

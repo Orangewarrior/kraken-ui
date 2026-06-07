@@ -127,12 +127,37 @@ search term could act as a wildcard (not injection, but surprising).
 `security::sanitize::escape_like` and a `LIKE ... ESCAPE '\'` clause, so
 metacharacters are matched literally.
 
+## Hardening added in 0.5.0
+
+A second pass addressed the deeper findings raised after the 0.4.0 review:
+
+- **WAF metrics channel pinned.** The metrics client trusts only the configured
+  `waf-cert-ca`, not the system root store.
+- **Account-lockout DoS removed.** The per-account failure counter is now keyed
+  by IP *and* account, so a victim cannot be locked out from unrelated
+  addresses.
+- **Credential-validity oracle closed.** A valid non-admin login returns the
+  same generic response as a failed one.
+- **Pagination offset bounded** to stop hostile `start` values forcing large
+  scans.
+- **SQLite hardened**: WAL, `busy_timeout`, `synchronous=NORMAL`,
+  `foreign_keys`, and garbage collection of expired session rows.
+- **Dedicated audit log** (`audit.jsonl`) separate from the application log.
+- **Global per-IP request rate limiter** as defence in depth.
+- **Passwords wrapped in `Zeroizing`** on the verification and hashing paths.
+
 ## Remaining follow-ups
 
-These are intentionally out of scope for 0.4.0 and tracked for later:
+Intentionally out of scope, tracked for later:
 
-- Back the login throttle (H-1) and, optionally, sessions with a shared store
-  for multi-replica deployments.
-- Periodically prune expired rows from the `kraken_sessions` table (expired rows
-  are already ignored on load, but not yet garbage-collected).
-- Consider a CSP `report-to` endpoint to collect violation reports.
+- Back the login throttle and the request rate limiter (and optionally sessions)
+  with a shared store for multi-replica deployments; today they are
+  process-local.
+- Consider TLS 1.3-only and/or mutual TLS for the console. The current rustls
+  defaults (TLS 1.2+1.3 with strong cipher suites) are already safe, so this is
+  a deployment-policy choice rather than a fix.
+- Consider a CSP `report-to` endpoint to collect violation reports (needs a
+  collector to be useful).
+- The markup check on secrets (`secret_has_rejected_markup`) is kept as a
+  deliberate defensive control; passwords are hashed and never reflected, so it
+  is not a vulnerability, only a small reduction of the password character set.

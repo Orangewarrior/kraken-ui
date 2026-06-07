@@ -11,11 +11,12 @@ use axum_csrf::CsrfToken;
 use serde::Serialize;
 
 use crate::{
+    controllers::pagination::{PageResponse, parse_query_u64},
     error::AppError,
     models::vulnerability_repository::VulnerabilityRepository,
     security::sanitize,
     state::AppState,
-    view::{ShowAttacksTemplate, render},
+    view::{ShowAttacksTemplate, nav, render},
 };
 
 #[derive(Serialize)]
@@ -30,16 +31,6 @@ pub struct AttackRow {
     country: String,
 }
 
-#[derive(Serialize)]
-pub struct AttackPageResponse {
-    draw: u64,
-    #[serde(rename = "recordsTotal")]
-    records_total: u64,
-    #[serde(rename = "recordsFiltered")]
-    records_filtered: u64,
-    data: Vec<AttackRow>,
-}
-
 pub async fn show_attacks(
     State(state): State<AppState>,
     token: CsrfToken,
@@ -48,7 +39,7 @@ pub async fn show_attacks(
         .authenticity_token()
         .map_err(|error| AppError::internal(anyhow!("failed to create CSRF token: {error}")))?;
     let response = render(ShowAttacksTemplate {
-        active_page: "monitor",
+        active_page: nav::MONITOR,
         csrf_token,
         database_available: state.waf_database.is_some(),
     })?;
@@ -62,7 +53,7 @@ pub async fn api_attacks(
     let Some(database) = state.waf_database.clone() else {
         return Ok((
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(AttackPageResponse {
+            Json(PageResponse::<AttackRow> {
                 draw: 1,
                 records_total: 0,
                 records_filtered: 0,
@@ -100,19 +91,11 @@ pub async fn api_attacks(
             country: item.country,
         })
         .collect();
-    Ok(Json(AttackPageResponse {
+    Ok(Json(PageResponse {
         draw,
         records_total: page.records_total,
         records_filtered: page.records_filtered,
         data,
     })
     .into_response())
-}
-
-fn parse_query_u64(query: &HashMap<String, String>, key: &str, fallback: u64) -> u64 {
-    query
-        .get(key)
-        .map(|value| sanitize::plain_text(value))
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(fallback)
 }

@@ -45,6 +45,23 @@ impl SeaOrmSessionStore {
         self.database.get_database_backend()
     }
 
+    /// Removes every expired session row. Called opportunistically on each new
+    /// session so the table cannot accumulate dead rows indefinitely.
+    pub async fn delete_expired(&self) -> session_store::Result<u64> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let statement = Statement::from_sql_and_values(
+            self.backend(),
+            "DELETE FROM kraken_sessions WHERE expiry_utc <= ?",
+            [Value::from(now)],
+        );
+        let result = self
+            .database
+            .execute(statement)
+            .await
+            .map_err(backend_error)?;
+        Ok(result.rows_affected())
+    }
+
     async fn id_exists(&self, id: &Id) -> session_store::Result<bool> {
         let statement = Statement::from_sql_and_values(
             self.backend(),
@@ -83,6 +100,8 @@ impl SeaOrmSessionStore {
 #[async_trait]
 impl SessionStore for SeaOrmSessionStore {
     async fn create(&self, record: &mut Record) -> session_store::Result<()> {
+        // Opportunistically prune dead rows so the table stays bounded.
+        let _ = self.delete_expired().await;
         // Resolve any id collision before inserting, rather than overwriting an
         // unrelated session.
         while self.id_exists(&record.id).await? {
