@@ -37,6 +37,12 @@ All notable changes to this project are recorded in this file.
 - Corrected the declared licence to **MIT** (in `Cargo.toml`, the README and the
   docs) to match the `LICENSE` file, which has always been MIT.
 
+### Removed
+
+- Deleted the stale, unused `conf/setup.conf`, which the application never loaded
+  (only `conf/setup.yaml` is read) and which leaked a developer's local path and
+  username.
+
 ### Documentation
 
 - Documented the persistent session store and the `kraken_sessions` table,
