@@ -31,6 +31,8 @@ All notable changes to this project are recorded in this file.
   centralised async crypto helpers, a shared protected-file reader, navigation
   constants, and RFC 3339 timestamps via the `time` crate.
 - Removed the unused `OperatorRepository::delete_by_email`.
+- Made the supplementary Semgrep CI job best-effort so a transient Docker Hub
+  image-pull failure cannot block a merge; CodeQL remains the blocking SAST gate.
 
 ### Fixed
 

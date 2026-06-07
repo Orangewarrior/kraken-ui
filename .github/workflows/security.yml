@@ -31,6 +31,10 @@ jobs:
   semgrep:
     name: SAST - Semgrep
     runs-on: ubuntu-latest
+    # Best-effort: the scan itself is already non-blocking (it only uploads
+    # SARIF), so do not let a transient Docker Hub image-pull failure block the
+    # merge. CodeQL remains the blocking SAST gate.
+    continue-on-error: true
     container:
       image: semgrep/semgrep
     permissions:
