@@ -11,11 +11,15 @@ inline JavaScript.
 
 - **Secure by default.** TLS is mandatory, sessions and CSRF cookies use the
   `__Host-` prefix, and a strict Content-Security-Policy forbids inline
-  scripts and styles. Logins are rate-limited, timing-equalised, and sessions
-  are persisted and revocable.
+  scripts and styles. Logins are rate-limited and timing-equalised, sessions are
+  persisted and revocable, and a global per-IP request limiter guards every
+  route.
 - **Defence in depth on passwords.** Argon2id hashing (libsodium-compatible)
   wrapped in an XChaCha20-Poly1305 envelope with a per-user AAD, so a hash can
-  never be replayed against another account.
+  never be replayed against another account; plaintext is held in `Zeroizing`.
+- **Auditable.** Authentication and operator-administration events are written
+  to a dedicated `audit.jsonl`, and the WAF metrics channel is pinned to the
+  certificate you configure.
 - **No surprises in your dependency tree.** Every transitive licence exception
   is pinned in `deny.toml`, and CI runs Clippy, Semgrep, CodeQL, cargo-audit,
   cargo-deny and OSV Scanner on every push.
@@ -121,11 +125,11 @@ The administrative menu is defined once, in
 ```text
 src/
 ├── routes/        # endpoint declarations
-├── controllers/   # HTTP handlers: CSRF, sessions, rendering
-├── models/        # SeaORM entities and repositories
+├── controllers/   # HTTP handlers: CSRF, sessions, rendering, pagination
+├── models/        # SeaORM entities, repositories and the session store
 ├── services/      # password crypto and WAF metrics boundaries
-├── security/      # sanitisation, password policy, header parser
-├── middleware/    # authentication and global security headers
+├── security/      # sanitisation, password policy, headers, CSRF, rate limiting
+├── middleware/    # auth, global security headers and the per-IP rate limiter
 └── view/          # Askama templates and local assets
 ```
 
@@ -133,8 +137,9 @@ For the bigger picture, see the [`docs/`](docs/) directory:
 
 - [Architecture](docs/architecture.md) — how the pieces fit together.
 - [Security](docs/security.md) — the controls and why they exist.
-- [Database & ACL](docs/database.md) — schema and routes.
-- [Operations](docs/operations.md) — configuration, logs and headers.
+- [Security review](docs/security-review.md) — standing findings and their status.
+- [Database & ACL](docs/database.md) — schema, sessions and routes.
+- [Operations](docs/operations.md) — configuration, env vars, logs and limits.
 - [Dependency licences](docs/dependency-licenses.md) — the licence policy.
 
 ## Building and testing
@@ -175,4 +180,4 @@ and a standing review of known gaps lives in
 
 ## Licence
 
-Kraken UI is released under the [BSD-3-Clause](LICENSE) licence.
+Kraken UI is released under the [MIT](LICENSE) licence

@@ -1,6 +1,6 @@
 # Dependency license policy
 
-Kraken UI is licensed under BSD-3-Clause. Direct application dependencies are
+Kraken UI is licensed under MIT. Direct application dependencies are
 selected with an MIT or BSD license option.
 
 The mandatory stack introduces additional licenses through transitive

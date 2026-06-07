@@ -32,6 +32,19 @@ All notable changes to this project are recorded in this file.
   constants, and RFC 3339 timestamps via the `time` crate.
 - Removed the unused `OperatorRepository::delete_by_email`.
 
+### Fixed
+
+- Corrected the declared licence to **MIT** (in `Cargo.toml`, the README and the
+  docs) to match the `LICENSE` file, which has always been MIT.
+
+### Documentation
+
+- Documented the persistent session store and the `kraken_sessions` table,
+  the dedicated `audit.jsonl` log, the login throttle and global rate limiter,
+  WAF certificate pinning, and the new helper modules across `docs/architecture.md`,
+  `docs/database.md`, `docs/operations.md` and `docs/security.md`.
+- Refreshed the README's feature highlights, project layout and docs index.
+
 ## 0.4.0 - 2026-06-06
 
 ### Security
