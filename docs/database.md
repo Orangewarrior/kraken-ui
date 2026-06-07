@@ -18,6 +18,22 @@ CREATE TABLE operators (
 Beyond the unique email that was requested, `username` is unique too, which
 makes authentication deterministic.
 
+## Sessions
+
+Sessions are persisted by `SeaOrmSessionStore` in the same SQLite database:
+
+```sql
+CREATE TABLE kraken_sessions (
+    id TEXT PRIMARY KEY NOT NULL,
+    record TEXT NOT NULL,      -- the serialised session record (JSON)
+    expiry_utc INTEGER NOT NULL
+);
+```
+
+Records past their `expiry_utc` are ignored on load and pruned whenever a new
+session is created, so the table stays bounded. Deleting a row immediately
+revokes that session.
+
 ## Public routes
 
 - `GET /kraken_ui/login` — the login form.

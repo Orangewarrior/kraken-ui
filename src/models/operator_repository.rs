@@ -4,12 +4,17 @@ use anyhow::Context;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, Condition, DatabaseConnection, EntityTrait,
     IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
-    sea_query::LikeExpr,
 };
+use zeroize::Zeroizing;
 
 use crate::{
-    models::operator, security::sanitize, services::password_crypto::PasswordCryptoService,
+    models::{like_contains, operator},
+    services::password_crypto::{PasswordCryptoService, spawn_encrypt},
 };
+
+/// Upper bound on the pagination offset, to stop a hostile `start` value forcing
+/// SQLite into an enormous and expensive row scan.
+const MAX_OFFSET: u64 = 100_000;
 
 #[derive(Clone)]
 pub struct OperatorRepository {
@@ -101,10 +106,10 @@ impl OperatorRepository {
         .await
         .context("failed to insert operator")?;
 
-        let encrypted_password_hash = encrypt_password(
+        let encrypted_password_hash = spawn_encrypt(
             self.password_crypto.clone(),
             pending_operator.id_user,
-            input.password.to_owned(),
+            Zeroizing::new(input.password.to_owned()),
         )
         .await?;
         let mut active_operator = pending_operator.into_active_model();
@@ -132,11 +137,12 @@ impl OperatorRepository {
         active_operator.operator_type = Set(input.operator_type.to_owned());
         active_operator.updated_at = Set(current_timestamp());
         if let Some(password) = input.password {
-            active_operator.encrypted_password_hash =
-                Set(
-                    encrypt_password(self.password_crypto.clone(), user_id, password.to_owned())
-                        .await?,
-                );
+            active_operator.encrypted_password_hash = Set(spawn_encrypt(
+                self.password_crypto.clone(),
+                user_id,
+                Zeroizing::new(password.to_owned()),
+            )
+            .await?);
         }
         active_operator
             .update(&self.database)
@@ -169,11 +175,12 @@ impl OperatorRepository {
     ) -> anyhow::Result<operator::Model> {
         let user_id = existing.id_user;
         let mut active_operator = existing.into_active_model();
-        active_operator.encrypted_password_hash =
-            Set(
-                encrypt_password(self.password_crypto.clone(), user_id, password.to_owned())
-                    .await?,
-            );
+        active_operator.encrypted_password_hash = Set(spawn_encrypt(
+            self.password_crypto.clone(),
+            user_id,
+            Zeroizing::new(password.to_owned()),
+        )
+        .await?);
         active_operator.updated_at = Set(current_timestamp());
         active_operator
             .update(&self.database)
@@ -186,15 +193,6 @@ impl OperatorRepository {
             .exec(&self.database)
             .await
             .context("failed to delete operator")?;
-        Ok(result.rows_affected)
-    }
-
-    pub async fn delete_by_email(&self, email: &str) -> anyhow::Result<u64> {
-        let result = operator::Entity::delete_many()
-            .filter(operator::Column::Email.eq(email.to_owned()))
-            .exec(&self.database)
-            .await
-            .context("failed to delete operator by email")?;
         Ok(result.rows_affected)
     }
 
@@ -219,6 +217,7 @@ impl OperatorRepository {
             }
             query = query.filter(condition);
         }
+        let start = start.min(MAX_OFFSET);
         let records_filtered = query
             .clone()
             .count(&self.database)
@@ -239,34 +238,11 @@ impl OperatorRepository {
     }
 }
 
-async fn encrypt_password(
-    password_crypto: Arc<dyn PasswordCryptoService>,
-    user_id: i32,
-    password: String,
-) -> anyhow::Result<String> {
-    tokio::task::spawn_blocking(move || password_crypto.encrypt_password(user_id, &password))
-        .await
-        .context("password encryption task failed")?
-}
-
-/// Builds a substring `LIKE` pattern whose user-supplied part is escaped, so
-/// `%` and `_` in the search term are matched literally rather than as
-/// wildcards.
-fn like_contains(search: &str) -> LikeExpr {
-    LikeExpr::new(format!("%{}%", sanitize::escape_like(search))).escape('\\')
-}
-
 pub fn current_timestamp() -> String {
-    let now = time::OffsetDateTime::now_utc();
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        now.year(),
-        u8::from(now.month()),
-        now.day(),
-        now.hour(),
-        now.minute(),
-        now.second()
-    )
+    use time::format_description::well_known::Rfc3339;
+    time::OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

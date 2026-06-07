@@ -6,6 +6,16 @@ use axum::{
 
 use crate::error::AppError;
 
+/// Identifiers for the active navigation section, shared by the controllers and
+/// matched against in `admin_sidebar.html`. Keeping them as named constants
+/// avoids silent typos drifting from the template.
+pub mod nav {
+    pub const DASHBOARD: &str = "dashboard";
+    pub const ACL: &str = "acl";
+    pub const MONITOR: &str = "monitor";
+    pub const USER_STATUS: &str = "user_status";
+}
+
 #[derive(Template)]
 #[template(path = "login.html", escape = "html")]
 pub struct LoginTemplate<'a> {

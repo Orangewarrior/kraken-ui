@@ -6,7 +6,10 @@ use tokio::sync::Mutex;
 
 use crate::{
     config::AppConfig,
-    security::{password::PasswordPolicy, rate_limit::LoginThrottle},
+    security::{
+        password::PasswordPolicy,
+        rate_limit::{IpRateLimiter, LoginThrottle},
+    },
     services::password_crypto::PasswordCryptoService,
     services::waf_metrics::WafMetricsService,
 };
@@ -21,5 +24,6 @@ pub struct AppState {
     pub password_crypto: Arc<dyn PasswordCryptoService>,
     pub waf_metrics: WafMetricsService,
     pub login_throttle: Arc<LoginThrottle>,
+    pub request_rate_limiter: Arc<IpRateLimiter>,
     pub first_time_lock: Arc<Mutex<()>>,
 }

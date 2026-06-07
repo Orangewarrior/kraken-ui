@@ -1,6 +1,6 @@
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, time::Duration};
 
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use axum::{
     Form,
     extract::{ConnectInfo, State},
@@ -10,12 +10,13 @@ use axum_csrf::CsrfToken;
 use serde::Deserialize;
 use tower_sessions::Session;
 use tracing::{info, warn};
+use zeroize::Zeroizing;
 
 use crate::{
     error::AppError,
     models::operator_repository::OperatorRepository,
-    security::sanitize,
-    services::password_crypto::{PasswordCryptoService, PasswordVerification},
+    security::{csrf, sanitize},
+    services::password_crypto::{spawn_dummy, spawn_verify},
     state::AppState,
     view::{LoginTemplate, csrf_error_response, render},
 };
@@ -50,7 +51,7 @@ pub async fn login_submit(
     session: Session,
     Form(form): Form<LoginForm>,
 ) -> Result<Response, AppError> {
-    if !is_unchanged_by_sanitizer(&form.csrf_token) || token.verify(&form.csrf_token).is_err() {
+    if !csrf::verify(&token, &form.csrf_token) {
         return Ok(csrf_error_response());
     }
 
@@ -64,11 +65,13 @@ pub async fn login_submit(
     }
 
     let username = sanitize::plain_text(&form.login).to_ascii_lowercase();
-    let password = form.password;
-    let user_key = format!("user:{username}");
+    let password = Zeroizing::new(form.password);
+    // Key the per-account counter by IP *and* account. This still slows focused
+    // guessing from one source, but means an attacker cannot lock a victim out
+    // of their account from unrelated addresses (an account-lockout DoS).
+    let ip_user_key = format!("ip:{client_ip}|user:{username}");
 
-    // Throttle by account so a single account cannot be hammered from many IPs.
-    if let Some(remaining) = state.login_throttle.locked_for(&user_key) {
+    if let Some(remaining) = state.login_throttle.locked_for(&ip_user_key) {
         audit_login(&client_ip, &username, "locked");
         return locked_login_response(token, remaining).await;
     }
@@ -77,7 +80,7 @@ pub async fn login_submit(
         || password.len() > 256
         || sanitize::secret_has_rejected_markup(&password)
     {
-        register_login_failure(&state, &ip_key, &user_key);
+        register_login_failure(&state, &ip_key, &ip_user_key);
         audit_login(&client_ip, &username, "invalid_input");
         return invalid_login_response(token).await;
     }
@@ -85,12 +88,12 @@ pub async fn login_submit(
     let Some(operator) = repository.find_by_username(&username).await? else {
         // Spend the same time as a real verification so unknown usernames are
         // not distinguishable by response latency.
-        run_dummy_verification(state.password_crypto.clone(), password).await;
-        register_login_failure(&state, &ip_key, &user_key);
+        spawn_dummy(state.password_crypto.clone(), password).await;
+        register_login_failure(&state, &ip_key, &ip_user_key);
         audit_login(&client_ip, &username, "unknown_user");
         return invalid_login_response(token).await;
     };
-    let verification = verify_password(
+    let verification = spawn_verify(
         state.password_crypto.clone(),
         operator.id_user,
         operator.encrypted_password_hash.clone(),
@@ -105,13 +108,13 @@ pub async fn login_submit(
                 error = %error,
                 "password crypto service rejected the stored record"
             );
-            register_login_failure(&state, &ip_key, &user_key);
+            register_login_failure(&state, &ip_key, &ip_user_key);
             audit_login(&client_ip, &username, "crypto_error");
             return invalid_login_response(token).await;
         }
     };
     if !verification.valid {
-        register_login_failure(&state, &ip_key, &user_key);
+        register_login_failure(&state, &ip_key, &ip_user_key);
         audit_login(&client_ip, &username, "bad_password");
         return invalid_login_response(token).await;
     }
@@ -121,13 +124,15 @@ pub async fn login_submit(
             .await?;
     }
     if operator.operator_type != "admin" {
+        // Do not reveal that valid non-admin credentials exist: return the same
+        // generic response as a failed login.
         audit_login(&client_ip, &username, "not_admin");
-        return login_response(token, "Operator and auditor access is not enabled yet").await;
+        return invalid_login_response(token).await;
     }
 
     // Successful admin authentication: clear any recorded failures.
     state.login_throttle.record_success(&ip_key);
-    state.login_throttle.record_success(&user_key);
+    state.login_throttle.record_success(&ip_user_key);
 
     session
         .cycle_id()
@@ -163,7 +168,7 @@ pub async fn logout(
     session: Session,
     Form(form): Form<CsrfForm>,
 ) -> Result<Response, AppError> {
-    if !is_unchanged_by_sanitizer(&form.csrf_token) || token.verify(&form.csrf_token).is_err() {
+    if !csrf::verify(&token, &form.csrf_token) {
         return Ok(csrf_error_response());
     }
     let username = authenticated_username(&session).await.unwrap_or_default();
@@ -199,16 +204,9 @@ pub async fn authenticated_username(session: &Session) -> Option<String> {
     session.get::<String>(AUTHENTICATED_USERNAME).await.ok()?
 }
 
-fn register_login_failure(state: &AppState, ip_key: &str, user_key: &str) {
+fn register_login_failure(state: &AppState, ip_key: &str, ip_user_key: &str) {
     state.login_throttle.record_failure(ip_key);
-    state.login_throttle.record_failure(user_key);
-}
-
-async fn run_dummy_verification(password_crypto: Arc<dyn PasswordCryptoService>, password: String) {
-    let _ = tokio::task::spawn_blocking(move || {
-        password_crypto.run_dummy_verification(&password);
-    })
-    .await;
+    state.login_throttle.record_failure(ip_user_key);
 }
 
 fn audit_login(client_ip: &str, username: &str, outcome: &str) {
@@ -248,21 +246,4 @@ async fn login_response(token: CsrfToken, error_message: &str) -> Result<Respons
         error_message,
     })?;
     Ok((token, response).into_response())
-}
-
-fn is_unchanged_by_sanitizer(value: &str) -> bool {
-    sanitize::plain_text(value) == value
-}
-
-async fn verify_password(
-    password_crypto: Arc<dyn PasswordCryptoService>,
-    user_id: i32,
-    encrypted_record: String,
-    password: String,
-) -> anyhow::Result<PasswordVerification> {
-    tokio::task::spawn_blocking(move || {
-        password_crypto.verify_password(user_id, &encrypted_record, &password)
-    })
-    .await
-    .context("password verification task failed")?
 }

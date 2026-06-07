@@ -52,6 +52,10 @@ impl WafMetricsService {
             Certificate::from_pem(&certificate_bytes).context("failed to parse WAF CA PEM")?;
         let client = Client::builder()
             .https_only(true)
+            // Trust *only* the configured WAF CA, not the system roots, so the
+            // metrics channel is effectively pinned and cannot be intercepted by
+            // any other publicly trusted CA.
+            .tls_built_in_root_certs(false)
             .add_root_certificate(certificate)
             .timeout(Duration::from_secs(5))
             .build()

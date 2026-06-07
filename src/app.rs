@@ -16,7 +16,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{
     config::AppConfig,
-    middleware::security_headers,
+    middleware::{rate_limit, security_headers},
     models::{
         database,
         operator_repository::{NewOperator, OperatorRepository},
@@ -26,7 +26,7 @@ use crate::{
     security::{
         headers,
         password::{MediumOrStrongPasswordPolicy, PasswordPolicy},
-        rate_limit::LoginThrottle,
+        rate_limit::{IpRateLimiter, LoginThrottle},
         sanitize,
     },
     services::{
@@ -108,6 +108,7 @@ impl AppFactory {
             password_crypto,
             waf_metrics,
             login_throttle: Arc::new(LoginThrottle::with_defaults()),
+            request_rate_limiter: Arc::new(IpRateLimiter::with_defaults()),
             first_time_lock: Arc::new(tokio::sync::Mutex::new(())),
         };
 
@@ -129,6 +130,7 @@ impl AppFactory {
             .with_secure(true)
             .with_prefix_with_host(true);
 
+        let rate_limit_state = state.clone();
         let application = routes::create(state.clone())
             .layer(TraceLayer::new_for_http())
             .layer(CsrfLayer::new(csrf_config))
@@ -136,6 +138,12 @@ impl AppFactory {
             .layer(middleware::from_fn_with_state(
                 state,
                 security_headers::apply,
+            ))
+            // Outermost layer: a global per-IP request cap, applied before any
+            // other work is done.
+            .layer(middleware::from_fn_with_state(
+                rate_limit_state,
+                rate_limit::apply,
             ));
         Ok(application)
     }
@@ -150,7 +158,7 @@ fn load_session_signing_key() -> anyhow::Result<Key> {
     let encoded = match env::var("KRAKEN_UI_SESSION_KEY") {
         Ok(value) => Some(value),
         Err(_) => match env::var("KRAKEN_UI_SESSION_KEY_FILE") {
-            Ok(path) => Some(read_protected_file(Path::new(&path))?),
+            Ok(path) => Some(crate::security::read_protected_file(Path::new(&path))?),
             Err(_) => None,
         },
     };
@@ -175,45 +183,49 @@ fn load_session_signing_key() -> anyhow::Result<Key> {
     }
 }
 
-fn read_protected_file(path: &Path) -> anyhow::Result<String> {
-    let metadata = fs::metadata(path)
-        .with_context(|| format!("unable to read key metadata from {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if metadata.permissions().mode() & 0o077 != 0 {
-            bail!(
-                "session key file {} must not be accessible by group or others",
-                path.display()
-            );
-        }
-    }
-    let _ = &metadata;
-    fs::read_to_string(path).with_context(|| format!("unable to read key file {}", path.display()))
-}
+pub fn initialize_logging(config: &AppConfig) -> anyhow::Result<Vec<WorkerGuard>> {
+    use tracing_subscriber::{Layer, filter::filter_fn, fmt, prelude::*};
 
-pub fn initialize_logging(config: &AppConfig) -> anyhow::Result<WorkerGuard> {
     fs::create_dir_all(&config.log_directory).with_context(|| {
         format!(
             "unable to create log directory {}",
             config.log_directory.display()
         )
     })?;
-    let file_appender = tracing_appender::rolling::never(&config.log_directory, "kraken-ui.jsonl");
-    let (writer, guard) = tracing_appender::non_blocking(file_appender);
-    let filter = EnvFilter::try_from_default_env()
+
+    // Application log: everything, governed by RUST_LOG.
+    let (app_writer, app_guard) = tracing_appender::non_blocking(tracing_appender::rolling::never(
+        &config.log_directory,
+        "kraken-ui.jsonl",
+    ));
+    let app_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("kraken_ui=info,tower_http=info"));
-    tracing_subscriber::fmt()
+    let app_layer = fmt::layer()
         .json()
-        .with_env_filter(filter)
-        .with_writer(writer)
         .with_current_span(false)
         .with_span_list(false)
+        .with_writer(app_writer)
+        .with_filter(app_filter);
+
+    // Dedicated, tamper-isolated audit log: only events on the `audit` target.
+    let (audit_writer, audit_guard) = tracing_appender::non_blocking(
+        tracing_appender::rolling::never(&config.log_directory, "audit.jsonl"),
+    );
+    let audit_layer = fmt::layer()
+        .json()
+        .with_current_span(false)
+        .with_span_list(false)
+        .with_writer(audit_writer)
+        .with_filter(filter_fn(|metadata| metadata.target() == "audit"));
+
+    tracing_subscriber::registry()
+        .with(app_layer)
+        .with(audit_layer)
         .try_init()
         .map_err(|error| {
             anyhow::anyhow!("global tracing subscriber was already initialized: {error}")
         })?;
-    Ok(guard)
+    Ok(vec![app_guard, audit_guard])
 }
 
 async fn bootstrap_administrator(

@@ -2,6 +2,49 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.5.0 - 2026-06-07
+
+### Security
+
+- Added a global, per-IP request rate limiter (token bucket) as defence in
+  depth across every route.
+- Pinned the WAF metrics channel to the configured `waf-cert-ca` only, no longer
+  trusting the system root store, so it cannot be intercepted by another
+  publicly trusted CA.
+- Reworked login throttling to key the per-account counter by IP *and* account,
+  removing the account-lockout denial-of-service vector.
+- A successful login by a non-admin operator now returns the same generic
+  response as a failed login, closing a credential-validity oracle.
+- Bounded the pagination offset so a hostile `start` value cannot force an
+  expensive SQLite scan.
+- Enabled SQLite WAL, `busy_timeout`, `synchronous=NORMAL` and `foreign_keys`
+  on every connection; expired session rows are now garbage-collected.
+- Split logging into a dedicated `audit.jsonl` sink for `audit`-target events,
+  separate from the application log.
+- Plaintext passwords now flow through `Zeroizing` on the verification and
+  hashing paths.
+
+### Changed
+
+- Refactoring with no behavioural change: shared `PageResponse<T>` and query
+  helpers, a single `LIKE`-escaping helper, one CSRF-verification function,
+  centralised async crypto helpers, a shared protected-file reader, navigation
+  constants, and RFC 3339 timestamps via the `time` crate.
+- Removed the unused `OperatorRepository::delete_by_email`.
+
+### Fixed
+
+- Corrected the declared licence to **MIT** (in `Cargo.toml`, the README and the
+  docs) to match the `LICENSE` file, which has always been MIT.
+
+### Documentation
+
+- Documented the persistent session store and the `kraken_sessions` table,
+  the dedicated `audit.jsonl` log, the login throttle and global rate limiter,
+  WAF certificate pinning, and the new helper modules across `docs/architecture.md`,
+  `docs/database.md`, `docs/operations.md` and `docs/security.md`.
+- Refreshed the README's feature highlights, project layout and docs index.
+
 ## 0.4.0 - 2026-06-06
 
 ### Security

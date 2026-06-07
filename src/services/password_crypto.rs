@@ -1,4 +1,4 @@
-use std::{env, fs, path::Path};
+use std::{env, path::Path, sync::Arc};
 
 use anyhow::{Context, bail};
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -60,7 +60,7 @@ impl DryocPasswordCryptoService {
             Err(_) => {
                 let key_file = env::var("KRAKEN_UI_PASSWORD_KEY_FILE")
                     .context("set KRAKEN_UI_PASSWORD_KEY or KRAKEN_UI_PASSWORD_KEY_FILE")?;
-                read_key_file(Path::new(&key_file))?
+                crate::security::read_protected_file(Path::new(&key_file))?
             }
         };
         Self::from_base64_key(&key_id, encoded_key.trim())
@@ -184,21 +184,37 @@ impl PasswordCryptoService for DryocPasswordCryptoService {
     }
 }
 
-fn read_key_file(path: &Path) -> anyhow::Result<String> {
-    let metadata = fs::metadata(path)
-        .with_context(|| format!("unable to read key metadata from {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if metadata.permissions().mode() & 0o077 != 0 {
-            bail!(
-                "password key file {} must not be accessible by group or others",
-                path.display()
-            );
-        }
-    }
-    fs::read_to_string(path)
-        .with_context(|| format!("unable to read password key file {}", path.display()))
+/// Verifies a password on the blocking pool, so the Argon2id work never stalls
+/// the async runtime. The plaintext is held in `Zeroizing` and wiped when the
+/// task finishes.
+pub async fn spawn_verify(
+    service: Arc<dyn PasswordCryptoService>,
+    user_id: i32,
+    encrypted_record: String,
+    password: Zeroizing<String>,
+) -> anyhow::Result<PasswordVerification> {
+    tokio::task::spawn_blocking(move || {
+        service.verify_password(user_id, &encrypted_record, password.as_str())
+    })
+    .await
+    .context("password verification task failed")?
+}
+
+/// Encrypts a password on the blocking pool. See [`spawn_verify`].
+pub async fn spawn_encrypt(
+    service: Arc<dyn PasswordCryptoService>,
+    user_id: i32,
+    password: Zeroizing<String>,
+) -> anyhow::Result<String> {
+    tokio::task::spawn_blocking(move || service.encrypt_password(user_id, password.as_str()))
+        .await
+        .context("password encryption task failed")?
+}
+
+/// Runs the timing-equalising dummy verification on the blocking pool.
+pub async fn spawn_dummy(service: Arc<dyn PasswordCryptoService>, password: Zeroizing<String>) {
+    let _ = tokio::task::spawn_blocking(move || service.run_dummy_verification(password.as_str()))
+        .await;
 }
 
 fn normalize_key_id(key_id: &str) -> anyhow::Result<[u8; KEY_ID_BYTES]> {
