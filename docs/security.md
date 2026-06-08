@@ -36,18 +36,40 @@ behind them. For a running list of known gaps and proposed improvements, see
   page, never shown the resource. Sign-in itself is restricted to roles that can
   use the console: a valid login by a role that cannot (e.g. `auditor`) returns
   the same generic failure as a wrong password, so it is not a credential oracle.
-- **Untrusted WAF payloads are neutralised before display.** The single-attack
-  detail view passes the attacker-controlled `request_payload` through Ammonia
-  before rendering it, and the client-side syntax highlighter builds DOM nodes
-  only (never `innerHTML`), so it cannot reintroduce active markup under the
-  strict CSP / Trusted Types.
+- **Sessions cannot outlast their authority.** Each session row carries the
+  signed-in operator id. Deleting an operator, or changing their role, revokes
+  every live session they hold, so a removed account stops working immediately
+  and a demotion takes effect without waiting for re-login. Changing a password
+  revokes the operator's other sessions while sparing the one making the change.
+- **Untrusted WAF payloads are shown inert, not stripped.** The single-attack
+  detail view renders the attacker-controlled `request_payload` through the
+  template's HTML escaping, so the analyst sees the exact attack bytes rather
+  than a silently sanitised version. The client-side syntax highlighter reads the
+  text back via `textContent` and builds DOM nodes only (never `innerHTML`), so
+  nothing can execute under the strict CSP / Trusted Types.
 - **No caching of authenticated pages.** Authenticated responses send
   `Cache-Control: no-store`.
 - **Audit trail.** Structured events on the `audit` tracing target record login
   outcomes, logout, the `first_time` bootstrap and operator administration —
   never including secrets.
-- **Privacy-preserving logs.** Logs are JSONL, and events never include a
-  password, hash, CSRF token or session contents.
+- **Privacy-preserving logs.** Logs are JSONL, rolled daily so they cannot grow
+  without bound, and events never include a password, hash, CSRF token or session
+  contents.
+
+## Client IP and reverse proxies
+
+The login throttle and the global per-IP request limiter key on the TCP peer
+address from `ConnectInfo` — never on a client-supplied header such as
+`X-Forwarded-For`, which is trivially spoofable. Kraken UI is therefore designed
+to be exposed **directly at the edge**: terminate TLS on the process itself, as
+the mandatory-TLS server does.
+
+If you must place it behind a reverse proxy, be aware that every request then
+appears to originate from the proxy's address, which collapses both limiters
+onto a single key. Run the proxy on the same trust boundary and do not rely on
+the per-IP controls for tenant isolation in that topology. (The `first_time`
+bootstrap endpoint already refuses any request carrying proxy forwarding headers,
+so it cannot be reached through a proxy at all.)
 
 ## Licence policy
 
@@ -66,9 +88,9 @@ prevents the policy from quietly expanding over time.
 ## Bootstrapping the first administrator
 
 If no administrator exists, the application reads `KRAKEN_UI_ADMIN_PASSWORD`
-and `KRAKEN_UI_ADMIN_EMAIL`. The password must be at least 14 characters and
-include upper- and lower-case letters, a number and a symbol, with no spaces
-and without containing the username.
+and `KRAKEN_UI_ADMIN_EMAIL`. The password must be at least 14 characters, draw
+on at least three character classes (upper-case, lower-case, digit, symbol) and
+not contain the username. Spaces are allowed, so passphrases are practical.
 
 Alternatively, the one-shot `first_time` endpoint accepts a single loopback POST
 while the operators table is empty. It rejects requests that carry proxy

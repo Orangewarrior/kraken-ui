@@ -107,6 +107,7 @@ impl AppFactory {
             password_policy,
             password_crypto,
             waf_metrics,
+            session_store: session_store.clone(),
             login_throttle: Arc::new(LoginThrottle::with_defaults()),
             request_rate_limiter: Arc::new(IpRateLimiter::with_defaults()),
             first_time_lock: Arc::new(tokio::sync::Mutex::new(())),
@@ -193,8 +194,9 @@ pub fn initialize_logging(config: &AppConfig) -> anyhow::Result<Vec<WorkerGuard>
         )
     })?;
 
-    // Application log: everything, governed by RUST_LOG.
-    let (app_writer, app_guard) = tracing_appender::non_blocking(tracing_appender::rolling::never(
+    // Application log: everything, governed by RUST_LOG. Rolled daily so the file
+    // cannot grow without bound on a long-running service.
+    let (app_writer, app_guard) = tracing_appender::non_blocking(tracing_appender::rolling::daily(
         &config.log_directory,
         "kraken-ui.jsonl",
     ));
@@ -207,9 +209,10 @@ pub fn initialize_logging(config: &AppConfig) -> anyhow::Result<Vec<WorkerGuard>
         .with_writer(app_writer)
         .with_filter(app_filter);
 
-    // Dedicated, tamper-isolated audit log: only events on the `audit` target.
+    // Dedicated, tamper-isolated audit log: only events on the `audit` target,
+    // rolled daily like the application log.
     let (audit_writer, audit_guard) = tracing_appender::non_blocking(
-        tracing_appender::rolling::never(&config.log_directory, "audit.jsonl"),
+        tracing_appender::rolling::daily(&config.log_directory, "audit.jsonl"),
     );
     let audit_layer = fmt::layer()
         .json()

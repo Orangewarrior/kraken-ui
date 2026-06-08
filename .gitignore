@@ -27,7 +27,7 @@ db/*.db
 db/*.db-*
 db/*.sqlite
 db/*.sqlite-*
-log/*.jsonl
+log/*.jsonl*
 logs/
 *.pem
 *.key

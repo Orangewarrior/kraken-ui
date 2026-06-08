@@ -14,14 +14,16 @@ use zeroize::Zeroizing;
 
 use crate::{
     error::AppError,
-    models::operator_repository::OperatorRepository,
+    models::{operator_repository::OperatorRepository, session_store::USER_ID_FIELD},
     security::{csrf, sanitize},
     services::password_crypto::{spawn_dummy, spawn_verify},
     state::AppState,
     view::{LoginTemplate, csrf_error_response, render},
 };
 
-const AUTHENTICATED_USER_ID: &str = "authenticated_user_id";
+// Shared with the session store, which mirrors this value into an indexed column
+// so an operator's sessions can be revoked the moment their authority changes.
+const AUTHENTICATED_USER_ID: &str = USER_ID_FIELD;
 const AUTHENTICATED_USERNAME: &str = "authenticated_username";
 const AUTHENTICATED_OPERATOR_TYPE: &str = "authenticated_operator_type";
 

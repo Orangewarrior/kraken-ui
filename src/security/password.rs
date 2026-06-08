@@ -1,4 +1,4 @@
-use memchr::{memchr, memmem};
+use memchr::memmem;
 
 const MINIMUM_PASSWORD_LENGTH: usize = 14;
 
@@ -33,7 +33,6 @@ impl PasswordPolicy for MediumOrStrongPasswordPolicy {
             .into_iter()
             .filter(|present| *present)
             .count();
-        let contains_space = memchr(b' ', bytes).is_some();
         let lowercase_password = password.to_ascii_lowercase();
         let lowercase_identity = identity.to_ascii_lowercase();
         let contains_identity =
@@ -46,9 +45,6 @@ impl PasswordPolicy for MediumOrStrongPasswordPolicy {
             return Err(policy_error(
                 "password must include at least three character classes",
             ));
-        }
-        if contains_space {
-            return Err(policy_error("password cannot contain spaces"));
         }
         if identity.len() >= 3 && contains_identity {
             return Err(policy_error("password cannot contain the login identifier"));
@@ -81,5 +77,12 @@ mod tests {
     fn accepts_a_medium_password_with_three_character_classes() {
         let policy = MediumOrStrongPasswordPolicy;
         assert!(policy.validate("long-random-pass9", "admin").is_ok());
+    }
+
+    #[test]
+    fn accepts_a_passphrase_containing_spaces() {
+        let policy = MediumOrStrongPasswordPolicy;
+        // Spaces are allowed (NIST 800-63B) so long passphrases are practical.
+        assert!(policy.validate("correct horse battery 9", "admin").is_ok());
     }
 }

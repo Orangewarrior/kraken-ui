@@ -98,9 +98,9 @@ pub async fn view_waf_request(
         client_ip: attack.client_ip,
         request_uri: attack.request_uri,
         fullpath_evidence: attack.fullpath_evidence,
-        // Neutralise the attacker-controlled payload with Ammonia before it is
-        // rendered (the template emits it without further escaping).
-        request_payload: sanitize::plain_text(&attack.request_payload),
+        // Rendered through the template's default HTML escaping, so the exact
+        // attack bytes are shown inert rather than silently stripped.
+        request_payload: attack.request_payload,
     })?;
     Ok(response)
 }

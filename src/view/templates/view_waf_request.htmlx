@@ -23,7 +23,7 @@
       <p><strong>Uri:</strong> {{ request_uri }}</p>
       <p><strong>Fullpath evidence:</strong> {{ fullpath_evidence }}</p>
       <p><strong>Request_payload:</strong></p>
-      <pre class="waf-code-window"><code data-waf-payload>{{ request_payload|safe }}</code></pre>
+      <pre class="waf-code-window"><code data-waf-payload>{{ request_payload }}</code></pre>
     </article>
   </main>
 </body>
