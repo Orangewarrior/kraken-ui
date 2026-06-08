@@ -15,3 +15,12 @@ Tips for consistent, lightweight images:
 - Capture at a standard desktop width (≈ 1440 px) so text stays legible.
 - Export as optimised PNG (or WebP); keep each file comfortably under ~1 MB.
 - Use the dark theme, which is how the console ships.
+
+## Status
+
+The three files are not in the repository yet. Add them on this branch to
+complete the README "Screenshots" section:
+
+- [ ] `docs/img/login.png`
+- [ ] `docs/img/dashboard.png`
+- [ ] `docs/img/attack-detail.png`
