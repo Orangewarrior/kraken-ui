@@ -84,8 +84,38 @@ headers, optionally requires a bootstrap token, and closes itself the moment the
 operators table contains a row.
 
 Every request first passes the global per-IP rate limiter. Everything under
-`/kraken_ui/auth` then requires an `admin` session and is returned with
+`/kraken_ui/auth` then requires a session and is returned with
 `Cache-Control: no-store`. **Every** response — including errors, redirects and
 static assets — passes through the middleware that applies
 `conf/headers_sec.txt`, so there is no path that can escape the hardening
 headers.
+
+## Roles and authorization
+
+There are three operator roles (`admin`, `operator`, `auditor`), enforced by
+three thin middleware functions in `middleware::authentication`, all built on a
+shared `guard` that checks the session's operator type against an allow-list:
+
+| Middleware | Allowed roles | Protects |
+|------------|---------------|----------|
+| `require_admin` | `admin` | The ACL management surface (add/edit/delete/list operators). |
+| `require_operator` | `admin`, `operator` | The day-to-day console: dashboard, attacks table, self-service password change, logout. |
+| `require_attack_viewer` | `admin`, `operator`, `auditor` | The single-attack detail view only. |
+
+The same dashboard, attacks and password-change controllers serve both admins
+and operators; the controller computes `show_acl` (`auth::is_admin`) and passes
+it to the template, which renders the ACL sidebar section only for admins. Today
+only `admin` and `operator` accounts can sign in — the `auditor` role is already
+authorised for the read-only detail view for forward compatibility.
+
+## The single-attack detail view
+
+`controllers::waf::view_waf_request` renders one WAF finding into the
+`view_waf_request.htmlx` template (opened in a new tab from the attacks table).
+It looks the row up read-only through `VulnerabilityRepository::find_by_id`,
+maps the severity to a colour class, renders the stored timestamp in a
+human-readable form, and sanitises the attacker-controlled `request_payload`
+with Ammonia before it reaches the template (which emits it without further
+escaping). Syntax highlighting is applied in `view/static/app.js` by building
+DOM nodes only — never `innerHTML` — so it remains compatible with the strict
+CSP and Trusted Types.
