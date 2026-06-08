@@ -5,6 +5,6 @@
   <section class="table-card">
     <div class="table-toolbar"><h2>Operators</h2><label class="table-search"><span>Search</span><input type="search" data-kw-table-search="operators-table" autocomplete="off" placeholder="ID, username or email"></label></div>
     <div class="table-scroll"><table id="operators-table" class="kw-table" data-kw-table data-table-kind="users" data-ajax-url="/kraken_ui/auth/api/operators" data-server-side="true" data-page-size="50" data-csrf-token="{{ csrf_token }}"><thead><tr><th>ID</th><th>Username</th><th>Email</th><th>Type</th><th>Status</th><th>Created</th><th>Edit</th><th>Delete</th></tr></thead><tbody></tbody></table></div>
-    <div class="table-footer"><button type="button" class="ghost-button" data-kw-table-prev="operators-table">Previous</button><span data-kw-table-info="operators-table">Loading...</span><button type="button" class="ghost-button" data-kw-table-next="operators-table">Next</button></div>
+    <div class="table-footer"><button type="button" class="ghost-button" data-kw-table-prev="operators-table">Previous</button><span data-kw-table-info="operators-table">Loading...</span><button type="button" class="ghost-button" data-kw-table-next="operators-table">Next</button>{% if show_acl %}<button type="button" class="ghost-button" data-kw-table-csv="operators-table">Download CSV</button>{% endif %}</div>
   </section>
 </main></div></body></html>

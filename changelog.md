@@ -2,7 +2,24 @@
 
 All notable changes to this project are recorded in this file.
 
-## 0.7.0 - 2026-06-08
+## 0.8.0 - 2026-06-08
+
+### Added
+
+- The attacks and users tables can now export the **current page to CSV** via a
+  Download CSV button in the table footer. The file is built client-side from the
+  rows on screen (untruncated values, action columns excluded) and downloaded
+  with a UTF-8 BOM. On the users table the button is rendered for administrators
+  only.
+- The attacks table **Rule match** column is truncated to its trailing 13
+  characters, prefixed with `...` (16 total), to free horizontal space; the full
+  rule is shown on hover as a tooltip.
+- Hovering any **Request URI** cell now shows the full, untruncated URI as a
+  tooltip (previously only present on truncated cells).
+
+### Changed
+
+- The attacks table now loads **100 rows per page** (was 50).
 
 ### Added
 

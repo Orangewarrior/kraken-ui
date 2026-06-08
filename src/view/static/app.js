@@ -342,20 +342,16 @@
     return tr;
   };
 
-  // Keep the attacks table compact: a Request URI longer than 61 chars is shown
-  // as "..." plus its last 61 chars (64 chars total). The interesting payload of
-  // an attack tends to be at the tail (query string, traversal), so the head is
-  // what gets dropped. The full value stays available on hover via title.
-  const REQUEST_URI_LIMIT = 61;
-  const requestUriCell = (uri) => {
-    const value = String(uri ?? "");
+  // Keep wide columns compact: a value longer than `limit` chars is shown as
+  // "..." plus its trailing `limit` chars (limit + 3 total). The tail is the
+  // discriminating part — a URI's query string, a rule's specific token — so the
+  // head is dropped. The full, untruncated value is always exposed on hover as a
+  // title tooltip. Request URI is capped at 61 chars, Rule match at 13.
+  const truncatedTailCell = (value, limit) => {
+    const text = String(value ?? "");
     const td = document.createElement("td");
-    if (value.length > REQUEST_URI_LIMIT) {
-      td.textContent = `...${value.slice(value.length - REQUEST_URI_LIMIT)}`;
-      td.title = value;
-    } else {
-      td.textContent = value;
-    }
+    td.textContent = text.length > limit ? `...${text.slice(text.length - limit)}` : text;
+    if (text) td.title = text;
     return td;
   };
 
@@ -368,8 +364,8 @@
       badgeCell(item.severity),
       cell(item.title),
       linkCell(detailHref, String(item.client_ip ?? ""), "table-link", true),
-      requestUriCell(item.request_uri),
-      cell(item.rule_match),
+      truncatedTailCell(item.request_uri, 61),
+      truncatedTailCell(item.rule_match, 13),
       cell(item.occurred_at),
       cell(item.country)
     );
@@ -377,6 +373,47 @@
   };
 
   const buildRows = (kind, items, csrfToken) => items.map((item) => kind === "attacks" ? buildAttackRow(item) : buildUserRow(item, csrfToken));
+
+  // Columns exported to CSV per table kind: [field, header]. Action columns
+  // (edit/delete) are intentionally excluded; values are exported untruncated.
+  const CSV_COLUMNS = {
+    attacks: [
+      ["id", "ID"], ["severity", "Severity"], ["title", "Title"], ["client_ip", "Client IP"],
+      ["request_uri", "Request URI"], ["rule_match", "Rule match"], ["occurred_at", "Occurred at"], ["country", "Country"]
+    ],
+    users: [
+      ["id", "ID"], ["username", "Username"], ["email", "Email"],
+      ["user_type", "Type"], ["status", "Status"], ["created_at", "Created"]
+    ]
+  };
+
+  // RFC 4180: quote a field when it contains a comma, quote or newline, doubling
+  // any embedded quotes.
+  const csvEscape = (value) => {
+    const text = String(value ?? "");
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+
+  const toCsv = (columns, rows) => {
+    const header = columns.map(([, label]) => csvEscape(label)).join(",");
+    const lines = rows.map((item) => columns.map(([key]) => csvEscape(item[key])).join(","));
+    return [header, ...lines].join("\r\n");
+  };
+
+  // Build the CSV client-side and hand it to the browser as a download. A leading
+  // BOM keeps spreadsheets reading it as UTF-8. The anchor's `download` attribute
+  // makes this a user-initiated download, not a fetch governed by the CSP.
+  const downloadCsv = (filename, content) => {
+    const blob = new Blob(["\ufeff" + content], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
 
   const statusRow = (message) => {
     const row = document.createElement("tr");
@@ -407,6 +444,8 @@
       let cache = [];
       let total = 0;
       let filtered = 0;
+      // Rows currently shown, kept so the CSV button can export the current page.
+      let lastRows = [];
       // Which column the attacks table is ordered by and in which direction.
       // Severity descending is the historical default; clicking Occurred at
       // switches to that column starting newest-first (descending).
@@ -457,6 +496,7 @@
 
           const totalPages = Math.max(1, Math.ceil(filtered / pageSize));
           if (page > totalPages) { page = totalPages; return render(); }
+          lastRows = rows;
           tbody.replaceChildren(...buildRows(kind, rows, csrfToken));
           setupDeleteConfirmations(tbody);
           if (info) info.textContent = `Page ${page} of ${totalPages} • ${filtered} filtered / ${total} total`;
@@ -472,6 +512,15 @@
       next?.addEventListener("click", () => { page += 1; render(); });
       search?.addEventListener("input", debounce(() => { page = 1; render(); }));
       searchField?.addEventListener("change", () => { page = 1; if (search?.value) render(); });
+
+      // Export the current page of rows to a CSV download.
+      const csvButton = qs(`[data-kw-table-csv="${id}"]`);
+      const csvColumns = CSV_COLUMNS[kind];
+      csvButton?.addEventListener("click", () => {
+        if (!csvColumns || lastRows.length === 0) return;
+        const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+        downloadCsv(`${kind}-page-${page}-${stamp}.csv`, toCsv(csvColumns, lastRows));
+      });
 
       const severitySort = qs("[data-sort-severity]", table);
       const occurredSort = qs("[data-sort-occurred]", table);
