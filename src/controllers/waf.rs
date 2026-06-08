@@ -21,7 +21,7 @@ use crate::{
         pagination::{PageResponse, parse_query_u64},
     },
     error::AppError,
-    models::vulnerability_repository::VulnerabilityRepository,
+    models::vulnerability_repository::{AttackSearchField, AttackSort, VulnerabilityRepository},
     security::sanitize,
     state::AppState,
     view::{ShowAttacksTemplate, ViewWafRequestTemplate, nav, render},
@@ -169,12 +169,26 @@ pub async fn api_attacks(
         .or_else(|| query.get("search"))
         .map(|value| sanitize::plain_text(value))
         .unwrap_or_default();
-    let severity_descending = query
-        .get("severity_order")
+    // The select box in front of the search input narrows the LIKE to a single
+    // column; absent or unknown tokens search every column.
+    let search_field = query
+        .get("search_field")
+        .map(|value| sanitize::plain_text(value))
+        .map_or(AttackSearchField::All, |value| {
+            AttackSearchField::from_token(&value)
+        });
+    // The clicked column header drives the sort: severity (default) or occurred
+    // at. A missing direction means descending, so occurred-at opens newest-first.
+    let sort = query
+        .get("sort")
+        .map(|value| sanitize::plain_text(value))
+        .map_or(AttackSort::Severity, |value| AttackSort::from_token(&value));
+    let descending = query
+        .get("order")
         .map(|value| sanitize::plain_text(value))
         .is_none_or(|value| value != "asc");
     let page = VulnerabilityRepository::new(database)
-        .page(start, length, &search, severity_descending)
+        .page(start, length, &search, search_field, sort, descending)
         .await?;
     let data = page
         .vulnerabilities

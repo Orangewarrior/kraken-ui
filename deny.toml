@@ -1,6 +1,13 @@
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+    # proc-macro-error2 is flagged unmaintained (RUSTSEC-2026-0173). It is pulled
+    # in only transitively through sea-orm -> sea-orm-macros -> sea-bae as a
+    # build-time proc-macro (no runtime or network exposure), and upstream offers
+    # no safe upgrade yet. Drop this once SeaORM stops depending on it.
+    "RUSTSEC-2026-0173",
+]
 
 [licenses]
 version = 2

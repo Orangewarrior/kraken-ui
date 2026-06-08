@@ -2,6 +2,32 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.7.0 - 2026-06-08
+
+### Added
+
+- The attacks table now has a sortable **Occurred at** column. The first click
+  orders by the most recent attack (newest first); clicking again reverses to
+  oldest first. The header is keyboard-operable and the ordering is applied
+  server-side alongside the existing severity sort.
+- A column **select box** in front of the attacks search input scopes the lookup
+  to a single field — ID, Title, Client IP, Request URI, Rule match, Occurred at
+  or Country — or all columns (the default), making the section more useful for
+  auditing. The filter is enforced server-side via the repository query.
+
+### Changed
+
+- Long **Request URI** values in the attacks table are truncated to their
+  trailing 61 characters, prefixed with `...` (64 characters total), so the
+  column stays compact and leaves room for the others. The full value remains
+  available on hover and search still matches the untruncated URI.
+- The attacks page lead now documents the Occurred-at sort behaviour and notes
+  that clicking an attack's ID or Client IP opens its full request/response
+  detail in a new tab.
+- `GET /kraken_ui/auth/api/attacks` accepts new `search_field`, `sort` and
+  `order` query parameters (replacing `severity_order`). All three features work
+  for both `admin` and `operator` sessions.
+
 ## 0.6.0 - 2026-06-08
 
 ### Added
