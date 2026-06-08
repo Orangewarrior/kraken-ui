@@ -6,9 +6,11 @@ use axum::{
 };
 use axum_csrf::CsrfToken;
 use serde::Serialize;
+use tower_sessions::Session;
 use tracing::warn;
 
 use crate::{
+    controllers::auth,
     error::AppError,
     models::vulnerability_repository::VulnerabilityRepository,
     services::waf_metrics::{ModuleMetric, WafMetricsSnapshot},
@@ -34,13 +36,14 @@ pub struct ChartValue {
     value: f64,
 }
 
-pub async fn get(token: CsrfToken) -> Result<Response, AppError> {
+pub async fn get(token: CsrfToken, session: Session) -> Result<Response, AppError> {
     let authenticity_token = token
         .authenticity_token()
         .map_err(|error| AppError::internal(anyhow!("failed to create CSRF token: {error}")))?;
     let response = render(DashboardTemplate {
         active_page: nav::DASHBOARD,
         csrf_token: authenticity_token,
+        show_acl: auth::is_admin(&session).await?,
     })?;
     Ok((token, response).into_response())
 }

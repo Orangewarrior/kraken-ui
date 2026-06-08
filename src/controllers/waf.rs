@@ -9,14 +9,22 @@ use axum::{
 };
 use axum_csrf::CsrfToken;
 use serde::Serialize;
+use time::{
+    OffsetDateTime, PrimitiveDateTime, UtcOffset, format_description::well_known::Rfc3339,
+    macros::format_description,
+};
+use tower_sessions::Session;
 
 use crate::{
-    controllers::pagination::{PageResponse, parse_query_u64},
+    controllers::{
+        auth,
+        pagination::{PageResponse, parse_query_u64},
+    },
     error::AppError,
     models::vulnerability_repository::VulnerabilityRepository,
     security::sanitize,
     state::AppState,
-    view::{ShowAttacksTemplate, nav, render},
+    view::{ShowAttacksTemplate, ViewWafRequestTemplate, nav, render},
 };
 
 #[derive(Serialize)]
@@ -34,6 +42,7 @@ pub struct AttackRow {
 pub async fn show_attacks(
     State(state): State<AppState>,
     token: CsrfToken,
+    session: Session,
 ) -> Result<Response, AppError> {
     let csrf_token = token
         .authenticity_token()
@@ -41,9 +50,99 @@ pub async fn show_attacks(
     let response = render(ShowAttacksTemplate {
         active_page: nav::MONITOR,
         csrf_token,
+        show_acl: auth::is_admin(&session).await?,
         database_available: state.waf_database.is_some(),
     })?;
     Ok((token, response).into_response())
+}
+
+/// Renders the standalone detail page for a single WAF finding. Reachable from
+/// the attacks table (clicking the ID or IP column) and opened in a new tab for
+/// administrators, operators and auditors.
+pub async fn view_waf_request(
+    State(state): State<AppState>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Result<Response, AppError> {
+    let Some(id) = query
+        .get("id")
+        .map(|value| sanitize::plain_text(value))
+        .and_then(|value| value.parse::<i32>().ok())
+        .filter(|id| *id > 0)
+    else {
+        return Ok((StatusCode::BAD_REQUEST, "Invalid attack ID").into_response());
+    };
+    let Some(database) = state.waf_database.clone() else {
+        return Ok((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "The WAF database configured in db_local is not available.",
+        )
+            .into_response());
+    };
+    let Some(attack) = VulnerabilityRepository::new(database)
+        .find_by_id(id)
+        .await?
+    else {
+        return Ok((StatusCode::NOT_FOUND, "Attack not found").into_response());
+    };
+    let response = render(ViewWafRequestTemplate {
+        attack_id: attack.id,
+        title: attack.title,
+        severity_class: severity_class(&attack.severity),
+        severity: attack.severity,
+        cwe: attack.cwe,
+        description: attack.description,
+        reference_url: attack.reference_url,
+        occurred_at: humanize_timestamp(&attack.occurred_at),
+        rule_match: attack.rule_match,
+        rule_line_match: attack.rule_line_match,
+        client_ip: attack.client_ip,
+        request_uri: attack.request_uri,
+        fullpath_evidence: attack.fullpath_evidence,
+        // Neutralise the attacker-controlled payload with Ammonia before it is
+        // rendered (the template emits it without further escaping).
+        request_payload: sanitize::plain_text(&attack.request_payload),
+    })?;
+    Ok(response)
+}
+
+/// Maps a severity string to the CSS modifier that colours it: low is green,
+/// medium orange, high red and critical maroon (bordô).
+fn severity_class(severity: &str) -> &'static str {
+    match severity.trim().to_ascii_lowercase().as_str() {
+        "low" => "sev-low",
+        "medium" => "sev-medium",
+        "high" => "sev-high",
+        "critical" => "sev-critical",
+        _ => "sev-unknown",
+    }
+}
+
+/// Renders the stored timestamp in a human-friendly form. The WAF database stores
+/// `occurred_at` as text; we accept RFC 3339 and a couple of common SQL shapes
+/// and fall back to the raw value if none parse.
+fn humanize_timestamp(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let output =
+        format_description!("[day] [month repr:long] [year], [hour]:[minute]:[second] UTC");
+    if let Ok(parsed) = OffsetDateTime::parse(trimmed, &Rfc3339)
+        && let Ok(formatted) = parsed.to_offset(UtcOffset::UTC).format(&output)
+    {
+        return formatted;
+    }
+    for description in [
+        format_description!("[year]-[month]-[day] [hour]:[minute]:[second]"),
+        format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]"),
+    ] {
+        if let Ok(parsed) = PrimitiveDateTime::parse(trimmed, description)
+            && let Ok(formatted) = parsed.format(&output)
+        {
+            return formatted;
+        }
+    }
+    trimmed.to_owned()
 }
 
 pub async fn api_attacks(
@@ -98,4 +197,36 @@ pub async fn api_attacks(
         data,
     })
     .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{humanize_timestamp, severity_class};
+
+    #[test]
+    fn maps_every_known_severity_to_a_colour_class() {
+        assert_eq!(severity_class("low"), "sev-low");
+        assert_eq!(severity_class("Medium"), "sev-medium");
+        assert_eq!(severity_class(" HIGH "), "sev-high");
+        assert_eq!(severity_class("critical"), "sev-critical");
+        assert_eq!(severity_class("weird"), "sev-unknown");
+    }
+
+    #[test]
+    fn humanizes_rfc3339_and_sql_timestamps() {
+        assert_eq!(
+            humanize_timestamp("2024-01-15T13:45:30Z"),
+            "15 January 2024, 13:45:30 UTC"
+        );
+        assert_eq!(
+            humanize_timestamp("2024-01-15 13:45:30"),
+            "15 January 2024, 13:45:30 UTC"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_the_raw_value_when_parsing_fails() {
+        assert_eq!(humanize_timestamp("not a date"), "not a date");
+        assert_eq!(humanize_timestamp(""), "");
+    }
 }

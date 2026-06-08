@@ -292,6 +292,7 @@ pub async fn show_user_table(token: CsrfToken) -> Result<Response, AppError> {
     render_with_csrf(token, |csrf_token| ShowUserTableTemplate {
         active_page: nav::ACL,
         csrf_token,
+        show_acl: true,
     })
 }
 
@@ -516,6 +517,7 @@ fn render_add_user(
     render_with_csrf(token, |csrf_token| AddUserTemplate {
         active_page: nav::ACL,
         csrf_token,
+        show_acl: true,
         roles: role_options(None),
         show_form: message_class != "success",
         message,
@@ -532,6 +534,7 @@ fn render_delete_user(
     render_with_csrf(token, |csrf_token| DeleteUserTemplate {
         active_page: nav::ACL,
         csrf_token,
+        show_acl: true,
         user_identity,
         message,
         message_class,
@@ -546,6 +549,7 @@ fn render_edit_search(
     render_with_csrf(token, |csrf_token| EditUserTemplate {
         active_page: nav::ACL,
         csrf_token,
+        show_acl: true,
         has_user: false,
         id_user: 0,
         username: String::new(),
@@ -566,6 +570,7 @@ fn render_edit_operator(
     render_with_csrf(token, |csrf_token| EditUserTemplate {
         active_page: nav::ACL,
         csrf_token,
+        show_acl: true,
         has_user: true,
         id_user: operator.id_user,
         username: operator.username,
@@ -584,9 +589,11 @@ fn render_password(
     message: String,
     message_class: &'static str,
 ) -> Result<Response, AppError> {
+    let show_acl = operator.operator_type == "admin";
     render_with_csrf(token, |csrf_token| UpdatePasswordTemplate {
         active_page: nav::USER_STATUS,
         csrf_token,
+        show_acl,
         id_user: operator.id_user,
         username: operator.username,
         email: operator.email,

@@ -16,6 +16,7 @@
         <span class="nav-icon" aria-hidden="true">#</span><strong>Dashboard</strong>
       </a>
     </div>
+    {% if show_acl %}
     <div class="nav-section">
       <button class="nav-trigger{% if active_page == "acl" %} active{% endif %}" type="button" data-accordion aria-expanded="true" aria-controls="acl-menu">
         <span class="nav-icon" aria-hidden="true">A</span><strong>ACL</strong><span class="chevron" aria-hidden="true">v</span>
@@ -27,6 +28,7 @@
         <a href="/kraken_ui/auth/edit_user">Find user</a>
       </div>
     </div>
+    {% endif %}
     <div class="nav-section">
       <button class="nav-trigger{% if active_page == "monitor" %} active{% endif %}" type="button" data-accordion aria-expanded="true" aria-controls="monitor-menu">
         <span class="nav-icon" aria-hidden="true">M</span><strong>Monitor</strong><span class="chevron" aria-hidden="true">v</span>
@@ -48,5 +50,5 @@
       </div>
     </div>
   </nav>
-  <section class="status-card"><span>Admin console</span><strong>Authenticated</strong><small>TLS session active</small></section>
+  <section class="status-card"><span>{% if show_acl %}Admin console{% else %}Operator console{% endif %}</span><strong>Authenticated</strong><small>TLS session active</small></section>
 </aside>

@@ -43,14 +43,17 @@ revokes that session.
   to loopback clients and closed once any operator exists.
 - `GET /health` — liveness check.
 
-## Administrative routes
+## Authenticated routes
 
-These all require an `admin` session and are served under `/kraken_ui/auth`.
+All of these are served under `/kraken_ui/auth`. Authorization is enforced by
+three role-aware middleware layers.
+
+### Administrator only (`require_admin`)
+
+The full ACL management surface.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET  | `/admin_panel`, `/dashboard` | Dashboard view |
-| GET  | `/api/dashboard` | Dashboard JSON metrics |
 | GET  | `/insert_user` | Add-user form |
 | POST | `/insert_user_action` | Create an operator |
 | GET  | `/delete_user` | Remove-user form |
@@ -59,11 +62,30 @@ These all require an `admin` session and are served under `/kraken_ui/auth`.
 | POST | `/update_user_action` | Update an operator |
 | GET  | `/show_user_table` | Operators table |
 | GET  | `/api/operators` | Operators JSON (paginated) |
+
+### Administrator or operator (`require_operator`)
+
+The day-to-day console. For operators the sidebar drops the ACL section; the
+pages themselves are identical.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET  | `/admin_panel`, `/dashboard` | Dashboard view |
+| GET  | `/api/dashboard` | Dashboard JSON metrics |
 | GET  | `/show_attacks` | Observed-attacks table |
 | GET  | `/api/attacks` | Attacks JSON (paginated) |
 | GET  | `/update_password` | Change-password form |
 | POST | `/update_password_action` | Change the current operator's password |
 | POST | `/logout` | Destroy the session |
+
+### Administrator, operator or auditor (`require_attack_viewer`)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET  | `/view_waf_request/?id=<id>` | Single WAF finding detail (new tab) |
+
+Only `admin` and `operator` accounts can sign in today; the auditor role is
+accepted by the detail-view middleware for forward compatibility.
 
 Every mutation uses POST and a CSRF token. The JSON endpoints never return
 `encrypted_password_hash`.
