@@ -138,6 +138,34 @@ light-themed, syntax-highlighted code box. The payload is sanitised with Ammonia
 server-side and highlighted client-side by building DOM nodes only (no
 `innerHTML`), so it stays within the strict CSP.
 
+## Screenshots
+
+A quick tour of the console — TLS-only, no CDN assets and no inline JavaScript.
+
+### Secure console sign-in
+
+The hardened login: `__Host-` session and CSRF cookies, rate-limited and
+timing-equalised authentication, and the 14-character minimum password policy
+enforced on both the front end and the back end.
+
+![Kraken UI secure console sign-in](docs/img/login.png)
+
+### WAF observability dashboard
+
+Live HTTPS metrics and SQLite aggregations from KrakenWAF: requests inspected
+and blocked, average latency, detections per CMC module, blocks per module, and
+the top blocking countries and IPs — all charted as local SVG.
+
+![Kraken UI WAF observability dashboard](docs/img/dashboard.png)
+
+### Single-attack detail view
+
+Opened from the attacks table by clicking an attack's **ID** or **client IP**:
+the full finding with colour-coded severity, CWE, description, rule match, URI
+and the Ammonia-sanitised, syntax-highlighted request/response payload.
+
+![Kraken UI single-attack request and response detail](docs/img/attack-detail.png)
+
 ## Project layout
 
 ```text
