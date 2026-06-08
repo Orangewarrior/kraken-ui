@@ -38,7 +38,10 @@ pub struct CsrfForm {
 }
 
 pub async fn login_page(token: CsrfToken, session: Session) -> Result<Response, AppError> {
-    if authenticated_operator_type(&session).await?.as_deref() == Some("admin") {
+    if matches!(
+        authenticated_operator_type(&session).await?.as_deref(),
+        Some("admin") | Some("operator")
+    ) {
         return Ok(Redirect::to("/kraken_ui/auth/admin_panel").into_response());
     }
     login_response(token, "").await
@@ -123,14 +126,14 @@ pub async fn login_submit(
             .update_encrypted_password(operator.id_user, replacement_record)
             .await?;
     }
-    if operator.operator_type != "admin" {
-        // Do not reveal that valid non-admin credentials exist: return the same
-        // generic response as a failed login.
-        audit_login(&client_ip, &username, "not_admin");
+    if !matches!(operator.operator_type.as_str(), "admin" | "operator") {
+        // Do not reveal that valid credentials exist for roles that cannot use
+        // the console (e.g. auditor): return the same generic failure response.
+        audit_login(&client_ip, &username, "forbidden_role");
         return invalid_login_response(token).await;
     }
 
-    // Successful admin authentication: clear any recorded failures.
+    // Successful authentication: clear any recorded failures.
     state.login_throttle.record_success(&ip_key);
     state.login_throttle.record_success(&ip_user_key);
 
@@ -198,6 +201,12 @@ pub async fn authenticated_operator_type(session: &Session) -> Result<Option<Str
                 "failed to read operator type from session: {error}"
             ))
         })
+}
+
+/// Whether the current session belongs to an administrator. Controllers use this
+/// to decide if the ACL section of the sidebar should be rendered.
+pub async fn is_admin(session: &Session) -> Result<bool, AppError> {
+    Ok(authenticated_operator_type(session).await?.as_deref() == Some("admin"))
 }
 
 pub async fn authenticated_username(session: &Session) -> Option<String> {

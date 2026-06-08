@@ -344,11 +344,13 @@
 
   const buildAttackRow = (item) => {
     const tr = document.createElement("tr");
+    // Clicking the ID or the client IP opens the full WAF request in a new tab.
+    const detailHref = `/kraken_ui/auth/view_waf_request/?id=${encodeURIComponent(item.id ?? "")}`;
     tr.append(
-      cell(item.id),
+      linkCell(detailHref, String(item.id ?? ""), "table-link", true),
       badgeCell(item.severity),
       cell(item.title),
-      cell(item.client_ip),
+      linkCell(detailHref, String(item.client_ip ?? ""), "table-link", true),
       cell(item.request_uri),
       cell(item.rule_match),
       cell(item.occurred_at),
@@ -612,11 +614,108 @@
     });
   };
 
+  // CSP forbids inline scripts, external highlighters and innerHTML (Trusted
+  // Types), so the WAF request payload is tokenised by building DOM nodes only.
+  const appendText = (parent, text) => {
+    if (text) parent.appendChild(document.createTextNode(text));
+  };
+
+  const appendToken = (parent, className, text) => {
+    if (!text) return;
+    const span = document.createElement("span");
+    span.className = className;
+    span.textContent = text;
+    parent.appendChild(span);
+  };
+
+  const highlightBodyLine = (parent, line) => {
+    const regex = /("(?:[^"\\]|\\.)*")(\s*:)?|(-?\b\d+(?:\.\d+)?\b)|(\btrue\b|\bfalse\b|\bnull\b)/g;
+    let lastIndex = 0;
+    let match;
+    while ((match = regex.exec(line)) !== null) {
+      appendText(parent, line.slice(lastIndex, match.index));
+      if (match[1] && match[2]) {
+        appendToken(parent, "waf-tok-json-key", match[1]);
+        appendText(parent, match[2]);
+      } else if (match[1]) {
+        appendToken(parent, "waf-tok-string", match[1]);
+      } else if (match[3]) {
+        appendToken(parent, "waf-tok-number", match[3]);
+      } else if (match[4]) {
+        appendToken(parent, "waf-tok-keyword", match[4]);
+      }
+      lastIndex = regex.lastIndex;
+    }
+    appendText(parent, line.slice(lastIndex));
+  };
+
+  const highlightHttpLine = (parent, line, isFirst, inHeaders) => {
+    const requestLine = /^([A-Z]{3,10})\s+(\S+)\s+(HTTP\/\d(?:\.\d)?)\s*$/.exec(line);
+    const statusLine = /^(HTTP\/\d(?:\.\d)?)\s+(\d{3})\s*(.*)$/.exec(line);
+    if (isFirst && requestLine) {
+      appendToken(parent, "waf-tok-method", requestLine[1]);
+      appendText(parent, " ");
+      appendToken(parent, "waf-tok-uri", requestLine[2]);
+      appendText(parent, " ");
+      appendToken(parent, "waf-tok-proto", requestLine[3]);
+      return true;
+    }
+    if (isFirst && statusLine) {
+      appendToken(parent, "waf-tok-proto", statusLine[1]);
+      appendText(parent, " ");
+      appendToken(parent, "waf-tok-status", statusLine[2]);
+      if (statusLine[3]) {
+        appendText(parent, " ");
+        appendToken(parent, "waf-tok-status", statusLine[3]);
+      }
+      return true;
+    }
+    if (inHeaders && !isFirst) {
+      const headerLine = /^([!#$%&'*+\-.^_`|~0-9A-Za-z]+):([\s\S]*)$/.exec(line);
+      if (headerLine) {
+        appendToken(parent, "waf-tok-header", headerLine[1]);
+        appendText(parent, ":");
+        appendToken(parent, "waf-tok-value", headerLine[2]);
+        return true;
+      }
+    }
+    highlightBodyLine(parent, line);
+    return false;
+  };
+
+  const highlightWafPayload = () => {
+    qsa("[data-waf-payload]").forEach((code) => {
+      const source = code.textContent || "";
+      if (!source) return;
+      const lines = source.split("\n");
+      code.textContent = "";
+      let sawFirst = false;
+      let inHeaders = true;
+      lines.forEach((line, index) => {
+        if (index > 0) appendText(code, "\n");
+        const isBlank = line.trim() === "";
+        if (!sawFirst && isBlank) {
+          appendText(code, line);
+          return;
+        }
+        if (inHeaders && isBlank && sawFirst) {
+          inHeaders = false;
+          appendText(code, line);
+          return;
+        }
+        const isFirst = !sawFirst;
+        sawFirst = true;
+        inHeaders = highlightHttpLine(code, line, isFirst, inHeaders);
+      });
+    });
+  };
+
   document.addEventListener("DOMContentLoaded", () => {
     setupPasswordPolicies();
     setupKwTables();
     setupDeleteConfirmations();
     setupDashboard();
     highlightEvidence();
+    highlightWafPayload();
   });
 })();

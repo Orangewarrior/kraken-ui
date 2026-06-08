@@ -36,6 +36,7 @@ pub struct RoleOption {
 pub struct DashboardTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
+    pub show_acl: bool,
 }
 
 #[derive(Template)]
@@ -43,6 +44,7 @@ pub struct DashboardTemplate {
 pub struct AddUserTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
+    pub show_acl: bool,
     pub roles: Vec<RoleOption>,
     pub show_form: bool,
     pub message: String,
@@ -54,6 +56,7 @@ pub struct AddUserTemplate {
 pub struct DeleteUserTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
+    pub show_acl: bool,
     pub user_identity: String,
     pub message: String,
     pub message_class: &'static str,
@@ -64,6 +67,7 @@ pub struct DeleteUserTemplate {
 pub struct EditUserTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
+    pub show_acl: bool,
     pub has_user: bool,
     pub id_user: i32,
     pub username: String,
@@ -79,6 +83,7 @@ pub struct EditUserTemplate {
 pub struct ShowUserTableTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
+    pub show_acl: bool,
 }
 
 #[derive(Template)]
@@ -86,6 +91,7 @@ pub struct ShowUserTableTemplate {
 pub struct UpdatePasswordTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
+    pub show_acl: bool,
     pub id_user: i32,
     pub username: String,
     pub email: String,
@@ -99,7 +105,29 @@ pub struct UpdatePasswordTemplate {
 pub struct ShowAttacksTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
+    pub show_acl: bool,
     pub database_available: bool,
+}
+
+#[derive(Template)]
+#[template(path = "view_waf_request.htmlx", escape = "html")]
+pub struct ViewWafRequestTemplate {
+    pub attack_id: i32,
+    pub title: String,
+    pub severity: String,
+    pub severity_class: &'static str,
+    pub cwe: String,
+    pub description: String,
+    pub reference_url: String,
+    pub occurred_at: String,
+    pub rule_match: String,
+    pub rule_line_match: String,
+    pub client_ip: String,
+    pub request_uri: String,
+    pub fullpath_evidence: String,
+    /// Already sanitised with Ammonia; rendered without further escaping so the
+    /// payload reads naturally and the client highlighter can tokenise it.
+    pub request_payload: String,
 }
 
 pub fn render<T: Template>(template: T) -> Result<Response, AppError> {

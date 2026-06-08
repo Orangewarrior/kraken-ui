@@ -7,15 +7,13 @@ use tower_http::services::ServeDir;
 
 use crate::{
     controllers::{acl, auth, dashboard, health, setup, waf},
-    middleware::authentication::require_admin,
+    middleware::authentication::{require_admin, require_attack_viewer, require_operator},
     state::AppState,
 };
 
 pub fn create(state: AppState) -> Router {
-    let protected_routes = Router::new()
-        .route("/kraken_ui/auth/admin_panel", get(dashboard::get))
-        .route("/kraken_ui/auth/dashboard", get(dashboard::get))
-        .route("/kraken_ui/auth/api/dashboard", get(dashboard::api))
+    // Routes only an administrator may reach: the full ACL management surface.
+    let admin_routes = Router::new()
         .route("/kraken_ui/auth/insert_user", get(acl::insert_user))
         .route(
             "/kraken_ui/auth/insert_user_action",
@@ -36,6 +34,15 @@ pub fn create(state: AppState) -> Router {
         )
         .route("/kraken_ui/auth/show_user_table", get(acl::show_user_table))
         .route("/kraken_ui/auth/api/operators", get(acl::api_operators))
+        .route_layer(middleware::from_fn(require_admin));
+
+    // Day-to-day console routes shared by administrators and operators. The
+    // sidebar drops the ACL section for operators, but the dashboard, attacks
+    // table and self-service password change are identical.
+    let operator_routes = Router::new()
+        .route("/kraken_ui/auth/admin_panel", get(dashboard::get))
+        .route("/kraken_ui/auth/dashboard", get(dashboard::get))
+        .route("/kraken_ui/auth/api/dashboard", get(dashboard::api))
         .route("/kraken_ui/auth/show_attacks", get(waf::show_attacks))
         .route("/kraken_ui/auth/api/attacks", get(waf::api_attacks))
         .route("/kraken_ui/auth/update_password", get(acl::update_password))
@@ -44,7 +51,15 @@ pub fn create(state: AppState) -> Router {
             post(acl::update_password_action),
         )
         .route("/kraken_ui/auth/logout", post(auth::logout))
-        .route_layer(middleware::from_fn(require_admin));
+        .route_layer(middleware::from_fn(require_operator));
+
+    // The single-attack detail view is also available to auditors.
+    let attack_view_routes = Router::new()
+        .route(
+            "/kraken_ui/auth/view_waf_request/",
+            get(waf::view_waf_request),
+        )
+        .route_layer(middleware::from_fn(require_attack_viewer));
 
     Router::new()
         .route("/", get(|| async { Redirect::to("/kraken_ui/login") }))
@@ -58,6 +73,8 @@ pub fn create(state: AppState) -> Router {
         .route("/kraken_ui/auth/first_time", post(setup::first_time))
         .route("/health", get(health::get))
         .nest_service("/static", ServeDir::new("src/view/static"))
-        .merge(protected_routes)
+        .merge(admin_routes)
+        .merge(operator_routes)
+        .merge(attack_view_routes)
         .with_state(state)
 }

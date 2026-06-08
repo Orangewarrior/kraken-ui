@@ -114,11 +114,29 @@ Then sign in at `https://host:port/kraken_ui/login`.
 |-------------|-----------|
 | Dashboard   | `/kraken_ui/auth/admin_panel`, `/kraken_ui/auth/dashboard` |
 | Operators   | `/kraken_ui/auth/insert_user`, `/delete_user`, `/edit_user`, `/show_user_table` |
-| Monitoring  | `/kraken_ui/auth/show_attacks` |
+| Monitoring  | `/kraken_ui/auth/show_attacks`, `/kraken_ui/auth/view_waf_request/?id=<id>` |
 | Account     | `/kraken_ui/auth/update_password` |
 
-The administrative menu is defined once, in
-`src/view/templates/admin_sidebar.html`.
+### Roles
+
+| Role | Can sign in | Sees |
+|------|-------------|------|
+| `admin`    | yes | Everything: dashboard, attacks, the single-attack detail view, the full ACL menu and self-service password change. |
+| `operator` | yes | The same dashboard, attacks table, attack detail view and password change as an admin — but **without** the ACL menu. |
+| `auditor`  | not yet | Reserved. Already authorised for the read-only attack detail view; sign-in is not implemented. |
+
+The sidebar is defined once in `src/view/templates/admin_sidebar.html`; the ACL
+section is rendered only when the controller passes `show_acl = true` (admins).
+
+### The single-attack detail view
+
+Clicking the **ID** or **client IP** column of the attacks table opens
+`view_waf_request` in a new tab. It shows the full finding — title, colour-coded
+severity, CWE, description, reference, a human-readable timestamp, rule match,
+client IP, URI and fullpath evidence — and, last, the WAF `request_payload` in a
+light-themed, syntax-highlighted code box. The payload is sanitised with Ammonia
+server-side and highlighted client-side by building DOM nodes only (no
+`innerHTML`), so it stays within the strict CSP.
 
 ## Project layout
 

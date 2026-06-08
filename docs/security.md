@@ -28,7 +28,20 @@ behind them. For a running list of known gaps and proposed improvements, see
 - **Persistent, revocable sessions.** Sessions are stored in SQLite and signed
   with a stable key (see *Keys*), so they survive restarts and can be revoked by
   deleting the row.
-- **No caching of admin pages.** Authenticated responses send
+- **Role-based access control.** Every authenticated route sits behind one of
+  three middleware guards keyed on the session's operator type: `require_admin`
+  (ACL management), `require_operator` (admin or operator console) and
+  `require_attack_viewer` (admin, operator or auditor — the read-only attack
+  detail view). A session lacking the required role is redirected to the login
+  page, never shown the resource. Sign-in itself is restricted to roles that can
+  use the console: a valid login by a role that cannot (e.g. `auditor`) returns
+  the same generic failure as a wrong password, so it is not a credential oracle.
+- **Untrusted WAF payloads are neutralised before display.** The single-attack
+  detail view passes the attacker-controlled `request_payload` through Ammonia
+  before rendering it, and the client-side syntax highlighter builds DOM nodes
+  only (never `innerHTML`), so it cannot reintroduce active markup under the
+  strict CSP / Trusted Types.
+- **No caching of authenticated pages.** Authenticated responses send
   `Cache-Control: no-store`.
 - **Audit trail.** Structured events on the `audit` tracing target record login
   outcomes, logout, the `first_time` bootstrap and operator administration —

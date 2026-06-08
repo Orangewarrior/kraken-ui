@@ -1873,3 +1873,107 @@ tr:last-child td {
     width: 100%;
   }
 }
+
+/* Clickable ID / IP cells in the attacks table. */
+.table-link {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+  border-bottom: 1px dotted var(--line-strong);
+}
+
+.table-link:hover,
+.table-link:focus {
+  color: var(--accent-2);
+  text-decoration: underline;
+}
+
+/* Standalone single-attack detail page (opened in a new tab). Dark grey
+   background with white text, as requested. */
+.waf-request-page {
+  background: #1d1f23;
+  color: #ffffff;
+}
+
+.waf-request-shell {
+  width: min(100% - 1.5rem, 70rem);
+  margin-inline: auto;
+  padding: clamp(1rem, 4vw, 2.5rem) 0;
+}
+
+.waf-request-card {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius);
+  background: #25282d;
+  padding: clamp(1rem, 3vw, 1.8rem);
+  box-shadow: var(--shadow);
+}
+
+.waf-request-card p {
+  margin: 0 0 0.6rem;
+  color: #ffffff;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.waf-request-card strong {
+  color: #ffffff;
+}
+
+.waf-severity {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.waf-severity.sev-low {
+  color: #36d66b;
+}
+
+.waf-severity.sev-medium {
+  color: #ff9f1c;
+}
+
+.waf-severity.sev-high {
+  color: #ff4d4d;
+}
+
+.waf-severity.sev-critical {
+  color: #800020;
+}
+
+/* Light-themed code box for the request/response payload, so it contrasts with
+   the dark page around it. */
+.waf-code-window {
+  margin: 0.4rem 0 0;
+  padding: 1rem 1.1rem;
+  overflow: auto;
+  max-height: 60vh;
+  border-radius: var(--radius-sm);
+  border: 1px solid #d4d7dd;
+  color: #1f2328;
+  background: #f6f8fa;
+  font: 0.9rem/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.waf-code-window code {
+  font: inherit;
+  color: inherit;
+}
+
+/* Light syntax-highlight palette for the payload tokens. */
+.waf-tok-method { color: #953800; font-weight: 800; }
+.waf-tok-uri { color: #0550ae; }
+.waf-tok-proto { color: #6639ba; }
+.waf-tok-status { color: #cf222e; font-weight: 800; }
+.waf-tok-header { color: #116329; font-weight: 700; }
+.waf-tok-value { color: #1f2328; }
+.waf-tok-json-key { color: #0550ae; font-weight: 700; }
+.waf-tok-string { color: #0a3069; }
+.waf-tok-number { color: #cf222e; }
+.waf-tok-keyword { color: #8250df; font-weight: 700; }

@@ -2,6 +2,30 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.6.0 - 2026-06-08
+
+### Added
+
+- Operators (`type = operator`) can now sign in to the console. Their session
+  renders the same dashboard, attacks table and self-service password change as
+  administrators, but the left navigation drops the ACL section entirely.
+- New authenticated detail page `GET /kraken_ui/auth/view_waf_request/?id=<id>`.
+  Clicking the ID or client-IP column of the attacks table opens the full WAF
+  finding in a new tab: title, severity (colour-coded), CWE, description,
+  reference, human-readable timestamp, rule match, client IP, URI, fullpath
+  evidence and, last, the request/response payload in a light-themed,
+  syntax-highlighted code box. The page is available to `admin`, `operator` and
+  `auditor` sessions only.
+- The attacker-controlled `request_payload` is sanitised with Ammonia before it
+  is rendered, and tokenised client-side without `innerHTML` to honour the
+  Trusted-Types CSP.
+
+### Changed
+
+- Authorization is now split into three role-aware middleware layers:
+  `require_admin` (ACL management), `require_operator` (admin + operator console)
+  and `require_attack_viewer` (admin + operator + auditor detail view).
+
 ## 0.5.0 - 2026-06-07
 
 ### Security
