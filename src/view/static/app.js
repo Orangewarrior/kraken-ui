@@ -342,6 +342,23 @@
     return tr;
   };
 
+  // Keep the attacks table compact: a Request URI longer than 61 chars is shown
+  // as "..." plus its last 61 chars (64 chars total). The interesting payload of
+  // an attack tends to be at the tail (query string, traversal), so the head is
+  // what gets dropped. The full value stays available on hover via title.
+  const REQUEST_URI_LIMIT = 61;
+  const requestUriCell = (uri) => {
+    const value = String(uri ?? "");
+    const td = document.createElement("td");
+    if (value.length > REQUEST_URI_LIMIT) {
+      td.textContent = `...${value.slice(value.length - REQUEST_URI_LIMIT)}`;
+      td.title = value;
+    } else {
+      td.textContent = value;
+    }
+    return td;
+  };
+
   const buildAttackRow = (item) => {
     const tr = document.createElement("tr");
     // Clicking the ID or the client IP opens the full WAF request in a new tab.
@@ -351,7 +368,7 @@
       badgeCell(item.severity),
       cell(item.title),
       linkCell(detailHref, String(item.client_ip ?? ""), "table-link", true),
-      cell(item.request_uri),
+      requestUriCell(item.request_uri),
       cell(item.rule_match),
       cell(item.occurred_at),
       cell(item.country)
@@ -381,6 +398,7 @@
       const serverSide = table.getAttribute("data-server-side") === "true";
       const pageSize = Number.parseInt(table.getAttribute("data-page-size") || "8", 10);
       const search = qs(`[data-kw-table-search="${id}"]`);
+      const searchField = qs(`[data-kw-table-field="${id}"]`);
       const previous = qs(`[data-kw-table-prev="${id}"]`);
       const next = qs(`[data-kw-table-next="${id}"]`);
       const info = qs(`[data-kw-table-info="${id}"]`);
@@ -389,7 +407,11 @@
       let cache = [];
       let total = 0;
       let filtered = 0;
-      let severityOrder = "desc";
+      // Which column the attacks table is ordered by and in which direction.
+      // Severity descending is the historical default; clicking Occurred at
+      // switches to that column starting newest-first (descending).
+      let sortColumn = "severity";
+      let sortOrder = "desc";
 
       const clientFilter = () => {
         const term = (search?.value || "").trim().toLowerCase();
@@ -409,7 +431,11 @@
             url.searchParams.set("start", String((page - 1) * pageSize));
             url.searchParams.set("length", String(pageSize));
             url.searchParams.set("search[value]", search?.value || "");
-            if (kind === "attacks") url.searchParams.set("severity_order", severityOrder);
+            if (kind === "attacks") {
+              url.searchParams.set("search_field", searchField?.value || "all");
+              url.searchParams.set("sort", sortColumn);
+              url.searchParams.set("order", sortOrder);
+            }
             const response = await fetch(url, { headers: { "Accept": "application/json" }, credentials: "same-origin" });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const payload = await response.json();
@@ -445,15 +471,33 @@
       previous?.addEventListener("click", () => { page = Math.max(1, page - 1); render(); });
       next?.addEventListener("click", () => { page += 1; render(); });
       search?.addEventListener("input", debounce(() => { page = 1; render(); }));
+      searchField?.addEventListener("change", () => { page = 1; if (search?.value) render(); });
+
       const severitySort = qs("[data-sort-severity]", table);
-      severitySort?.addEventListener("click", () => {
-        severityOrder = severityOrder === "desc" ? "asc" : "desc";
-        severitySort.setAttribute("data-order", severityOrder);
+      const occurredSort = qs("[data-sort-occurred]", table);
+      // Clicking a sortable header toggles direction when it is already the active
+      // column, otherwise it switches to that column starting descending.
+      const applySort = (column, header) => {
+        if (sortColumn === column) {
+          sortOrder = sortOrder === "desc" ? "asc" : "desc";
+        } else {
+          sortColumn = column;
+          sortOrder = "desc";
+        }
+        [severitySort, occurredSort].forEach((element) => element?.removeAttribute("data-order"));
+        header.setAttribute("data-order", sortOrder);
         page = 1;
         render();
-      });
-      severitySort?.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") severitySort.click();
+      };
+      severitySort?.addEventListener("click", () => applySort("severity", severitySort));
+      occurredSort?.addEventListener("click", () => applySort("occurred_at", occurredSort));
+      [severitySort, occurredSort].forEach((header) => {
+        header?.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            header.click();
+          }
+        });
       });
       render();
     });

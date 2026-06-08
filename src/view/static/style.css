@@ -960,7 +960,25 @@ tr:last-child td {
   color: var(--muted);
 }
 
+/* Select box (what to search) sits in front of the search input so an auditor
+   can scope the lookup to a single column. */
+.table-search-controls {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.table-search-controls input[type="search"] {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.table-search-controls select {
+  flex: 0 0 auto;
+}
+
 .table-search input,
+.table-search-controls select,
 .field-group input,
 .field-group select {
   min-height: 2.85rem;
@@ -1112,7 +1130,8 @@ tr:last-child td {
 .chart-color-8 { background: #facc15; }
 .chart-color-9 { background: #94a3b8; }
 
-[data-sort-severity] {
+[data-sort-severity],
+[data-sort-occurred] {
   cursor: pointer;
   color: var(--accent);
 }
