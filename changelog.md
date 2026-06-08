@@ -2,6 +2,45 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.9.0 - 2026-06-08
+
+A security-hardening release: live sessions can no longer outlast the authority
+that granted them, attack payloads are shown with full fidelity instead of being
+stripped, and logs are bounded.
+
+### Security
+
+- **Sessions are revoked the moment an operator's authority changes.** Each
+  session row now carries the signed-in operator id in an indexed `user_id`
+  column. Deleting an operator, or changing their role, revokes every live
+  session they hold — so a removed account stops working immediately and a
+  demotion takes effect without waiting for re-login (the route guards read the
+  role from the session). Changing a password revokes the operator's other
+  sessions, sparing only the one making the change. Previously a deleted or
+  demoted operator kept their existing access until the session happened to
+  expire.
+- **WAF request payloads are shown inert, not stripped.** The single-attack
+  detail view renders the attacker-controlled `request_payload` through the
+  template's HTML escaping instead of passing it through Ammonia. The analyst now
+  sees the exact attack bytes (the client highlighter reads them back via
+  `textContent`), and nothing can execute under the strict CSP / Trusted Types.
+- **Logs roll daily.** The application and audit logs now rotate per day so they
+  cannot grow without bound on a long-running service.
+
+### Changed
+
+- The password policy now **allows spaces**, so passphrases are practical
+  (aligned with NIST SP 800-63B). All other requirements are unchanged.
+- Dropped the deprecated `block-all-mixed-content` directive from the
+  Content-Security-Policy; it is already covered by `upgrade-insecure-requests`.
+
+### Documentation
+
+- `docs/security.md` now documents the **client-IP trust boundary**: the login
+  throttle and global rate limiter key on the TCP peer address, never on a
+  spoofable forwarding header, so Kraken UI is designed to be exposed directly at
+  the edge. The implications of running behind a reverse proxy are spelled out.
+
 ## 0.8.0 - 2026-06-08
 
 ### Added
