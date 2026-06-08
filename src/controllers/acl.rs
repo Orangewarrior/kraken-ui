@@ -178,6 +178,9 @@ pub async fn delete_user_action(
         );
     }
     repository.delete_by_id(target.id_user).await?;
+    // Revoke the removed operator's live sessions so the account cannot keep
+    // working until its session happens to expire.
+    revoke_sessions(&state, target.id_user).await;
     audit_operator_event("delete", target.id_user, &target.username);
     render_delete_user(token, String::new(), "User removed.".to_owned(), "error")
 }
@@ -268,6 +271,9 @@ pub async fn update_user_action(
             "error",
         );
     }
+    // Capture the privilege change before `existing` is consumed by the update,
+    // so a demotion can be enforced on any live session of the target.
+    let role_changed = existing.operator_type != input.operator_type;
     let updated = repository
         .update(
             existing,
@@ -279,6 +285,11 @@ pub async fn update_user_action(
             },
         )
         .await?;
+    // The route guards read the role from the session, so a change only takes
+    // effect once the operator signs in again under the new authority.
+    if role_changed {
+        revoke_sessions(&state, updated.id_user).await;
+    }
     audit_operator_event("update", updated.id_user, &updated.username);
     render_edit_operator(
         token,
@@ -394,6 +405,20 @@ pub async fn update_password_action(
         Ok(updated) => updated,
         Err(error) => return Err(AppError::internal(error)),
     };
+    // A changed password should not leave other sessions logged in (a hijacker's
+    // included); revoke them all while sparing the tab making the change.
+    if let Some(current) = session.id()
+        && let Err(error) = state
+            .session_store
+            .delete_by_user_id_except(authenticated_id, &current)
+            .await
+    {
+        tracing::warn!(
+            id_user = authenticated_id,
+            error = %error,
+            "failed to revoke other sessions after password change"
+        );
+    }
     audit_operator_event("password_change", authenticated_id, &username);
     render_password(
         token,
@@ -483,6 +508,15 @@ async fn verify_current_password(
     .await
     .map_err(AppError::internal)?;
     Ok(verification.valid)
+}
+
+/// Best-effort revocation of every session belonging to an operator. A failure
+/// here must not abort the administrative action that triggered it, so it is
+/// logged rather than propagated.
+async fn revoke_sessions(state: &AppState, id_user: i32) {
+    if let Err(error) = state.session_store.delete_by_user_id(id_user).await {
+        tracing::warn!(id_user, error = %error, "failed to revoke operator sessions");
+    }
 }
 
 fn audit_operator_event(action: &str, id_user: i32, username: &str) {

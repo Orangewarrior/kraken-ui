@@ -6,6 +6,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     config::AppConfig,
+    models::session_store::SeaOrmSessionStore,
     security::{
         password::PasswordPolicy,
         rate_limit::{IpRateLimiter, LoginThrottle},
@@ -23,6 +24,7 @@ pub struct AppState {
     pub password_policy: Arc<dyn PasswordPolicy>,
     pub password_crypto: Arc<dyn PasswordCryptoService>,
     pub waf_metrics: WafMetricsService,
+    pub session_store: SeaOrmSessionStore,
     pub login_throttle: Arc<LoginThrottle>,
     pub request_rate_limiter: Arc<IpRateLimiter>,
     pub first_time_lock: Arc<Mutex<()>>,

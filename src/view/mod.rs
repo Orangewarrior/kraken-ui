@@ -125,8 +125,10 @@ pub struct ViewWafRequestTemplate {
     pub client_ip: String,
     pub request_uri: String,
     pub fullpath_evidence: String,
-    /// Already sanitised with Ammonia; rendered without further escaping so the
-    /// payload reads naturally and the client highlighter can tokenise it.
+    /// Attacker-controlled WAF payload, rendered through the template's default
+    /// HTML escaping. The client highlighter reads it back via `textContent`, so
+    /// the analyst sees the exact bytes with no loss of fidelity and no markup
+    /// can execute under the strict CSP.
     pub request_payload: String,
 }
 
@@ -143,4 +145,41 @@ pub fn csrf_error_response() -> Response {
         "The form expired or the CSRF token is invalid",
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use askama::Template;
+
+    use super::ViewWafRequestTemplate;
+
+    #[test]
+    fn escapes_attacker_controlled_request_payload() {
+        let template = ViewWafRequestTemplate {
+            attack_id: 1,
+            title: "Stored XSS attempt".to_owned(),
+            severity: "high".to_owned(),
+            severity_class: "sev-high",
+            cwe: "CWE-79".to_owned(),
+            description: String::new(),
+            reference_url: String::new(),
+            occurred_at: String::new(),
+            rule_match: String::new(),
+            rule_line_match: String::new(),
+            client_ip: "203.0.113.7".to_owned(),
+            request_uri: "/".to_owned(),
+            fullpath_evidence: String::new(),
+            request_payload: "<script>alert(document.cookie)</script>".to_owned(),
+        };
+
+        let html = template
+            .render()
+            .unwrap_or_else(|error| panic!("template must render: {error}"));
+
+        // The exact bytes survive, but as inert text rather than an active tag:
+        // Askama emits numeric HTML entities the browser decodes back to the
+        // original characters inside `textContent`.
+        assert!(html.contains("&#60;script&#62;alert(document.cookie)&#60;/script&#62;"));
+        assert!(!html.contains("<script>alert(document.cookie)</script>"));
+    }
 }
