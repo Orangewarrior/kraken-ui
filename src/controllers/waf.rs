@@ -21,9 +21,7 @@ use crate::{
         pagination::{PageResponse, parse_query_u64},
     },
     error::AppError,
-    models::vulnerability_repository::{
-        AttackSearchField, AttackSort, VulnerabilityRepository,
-    },
+    models::vulnerability_repository::{AttackSearchField, AttackSort, VulnerabilityRepository},
     security::sanitize,
     state::AppState,
     view::{ShowAttacksTemplate, ViewWafRequestTemplate, nav, render},
