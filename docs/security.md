@@ -118,6 +118,10 @@ runs `crypto_pwhash_str_verify`, and compares the stored Argon2id parameters
 against the current "moderate" policy. If they are out of date, it transparently
 generates and persists a fresh envelope.
 
+The same envelope (with a purpose-specific AAD, `...:secret:totp` or
+`...:secret:mfa_recovery`) seals the optional two-factor TOTP secret and recovery
+codes. The full design is documented in [mfa.md](mfa.md).
+
 ## Keys
 
 - `KRAKEN_UI_PASSWORD_KEY` — a 32-byte key, Base64-encoded.

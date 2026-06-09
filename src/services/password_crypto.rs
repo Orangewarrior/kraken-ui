@@ -31,6 +31,22 @@ pub trait PasswordCryptoService: Send + Sync {
         password: &str,
     ) -> anyhow::Result<PasswordVerification>;
 
+    /// Reversibly encrypts a non-password secret (a TOTP shared secret or a
+    /// recovery code) bound to a user and a `domain`. Unlike a password, these
+    /// values must be recovered in plaintext to be checked, so they are sealed in
+    /// the same XChaCha20-Poly1305 envelope used for password hashes. The
+    /// user-and-domain AAD means a sealed record cannot be replayed against a
+    /// different account or repurposed (e.g. a recovery code read as a TOTP
+    /// secret).
+    fn encrypt_secret(&self, user_id: i32, domain: &str, plaintext: &str)
+    -> anyhow::Result<String>;
+    fn decrypt_secret(
+        &self,
+        user_id: i32,
+        domain: &str,
+        ciphertext: &str,
+    ) -> anyhow::Result<String>;
+
     /// Runs a verification of equivalent cost against a throwaway record so that
     /// a login attempt for a non-existent account takes the same time as one for
     /// a real account. This closes the username-enumeration timing side channel.
@@ -85,17 +101,27 @@ impl DryocPasswordCryptoService {
     }
 
     fn encrypt_hash(&self, user_id: i32, hash_record: &str) -> anyhow::Result<String> {
+        self.encrypt_with_aad(&password_aad(user_id), hash_record)
+    }
+
+    fn decrypt_hash(&self, user_id: i32, encrypted_record: &str) -> anyhow::Result<String> {
+        self.decrypt_with_aad(&password_aad(user_id), encrypted_record)
+    }
+
+    /// Seals `plaintext` in the key-id + nonce + ciphertext envelope, binding it to
+    /// `aad`. Shared by the password-hash and the reversible-secret paths so the
+    /// envelope format and its authenticated additional data stay in one place.
+    fn encrypt_with_aad(&self, aad: &str, plaintext: &str) -> anyhow::Result<String> {
         let cipher = XChaCha20Poly1305::new_from_slice(self.key.as_ref())
             .map_err(|_| anyhow::anyhow!("unable to construct XChaCha20-Poly1305 key"))?;
         let mut nonce_bytes = [0_u8; NONCE_BYTES];
         dryoc::rng::copy_randombytes(&mut nonce_bytes);
         let nonce = XNonce::from_slice(&nonce_bytes);
-        let aad = password_aad(user_id);
         let encrypted = cipher
             .encrypt(
                 nonce,
                 Payload {
-                    msg: hash_record.as_bytes(),
+                    msg: plaintext.as_bytes(),
                     aad: aad.as_bytes(),
                 },
             )
@@ -107,23 +133,22 @@ impl DryocPasswordCryptoService {
         Ok(STANDARD.encode(envelope))
     }
 
-    fn decrypt_hash(&self, user_id: i32, encrypted_record: &str) -> anyhow::Result<String> {
+    fn decrypt_with_aad(&self, aad: &str, encrypted_record: &str) -> anyhow::Result<String> {
         let envelope = STANDARD
             .decode(encrypted_record)
-            .context("encrypted password record is not valid base64")?;
+            .context("encrypted record is not valid base64")?;
         let minimum_length = KEY_ID_BYTES + NONCE_BYTES + TAG_BYTES;
         if envelope.len() < minimum_length {
-            bail!("encrypted password record is truncated");
+            bail!("encrypted record is truncated");
         }
         if envelope[..KEY_ID_BYTES] != self.key_id {
-            bail!("encrypted password record references an unavailable key id");
+            bail!("encrypted record references an unavailable key id");
         }
         let cipher = XChaCha20Poly1305::new_from_slice(self.key.as_ref())
             .map_err(|_| anyhow::anyhow!("unable to construct XChaCha20-Poly1305 key"))?;
         let nonce = XNonce::from_slice(&envelope[KEY_ID_BYTES..KEY_ID_BYTES + NONCE_BYTES]);
         let ciphertext = &envelope[KEY_ID_BYTES + NONCE_BYTES..];
-        let aad = password_aad(user_id);
-        let hash_bytes = cipher
+        let plaintext_bytes = cipher
             .decrypt(
                 nonce,
                 Payload {
@@ -131,8 +156,8 @@ impl DryocPasswordCryptoService {
                     aad: aad.as_bytes(),
                 },
             )
-            .map_err(|_| anyhow::anyhow!("password record authentication failed"))?;
-        String::from_utf8(hash_bytes).context("decrypted password hash is not UTF-8")
+            .map_err(|_| anyhow::anyhow!("record authentication failed"))?;
+        String::from_utf8(plaintext_bytes).context("decrypted record is not UTF-8")
     }
 }
 
@@ -176,6 +201,24 @@ impl PasswordCryptoService for DryocPasswordCryptoService {
             valid: true,
             replacement_record,
         })
+    }
+
+    fn encrypt_secret(
+        &self,
+        user_id: i32,
+        domain: &str,
+        plaintext: &str,
+    ) -> anyhow::Result<String> {
+        self.encrypt_with_aad(&secret_aad(user_id, domain), plaintext)
+    }
+
+    fn decrypt_secret(
+        &self,
+        user_id: i32,
+        domain: &str,
+        ciphertext: &str,
+    ) -> anyhow::Result<String> {
+        self.decrypt_with_aad(&secret_aad(user_id, domain), ciphertext)
     }
 
     fn run_dummy_verification(&self, password: &str) {
@@ -230,6 +273,10 @@ fn password_aad(user_id: i32) -> String {
     format!("{AAD_PREFIX}{user_id}:password_hash")
 }
 
+fn secret_aad(user_id: i32, domain: &str) -> String {
+    format!("{AAD_PREFIX}{user_id}:secret:{domain}")
+}
+
 #[cfg(test)]
 mod tests {
     use base64::{Engine, engine::general_purpose::STANDARD};
@@ -271,6 +318,26 @@ mod tests {
                 .verify_password(43, &encrypted, "Long&Random#Pass9")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn encrypts_and_recovers_a_secret_bound_to_user_and_domain() {
+        let service = service();
+        let sealed = service
+            .encrypt_secret(42, "totp", "JBSWY3DPEHPK3PXP")
+            .unwrap_or_else(|error| panic!("secret must seal: {error}"));
+
+        // The plaintext secret never appears in the sealed envelope.
+        assert!(memchr::memmem::find(sealed.as_bytes(), b"JBSWY3DPEHPK3PXP").is_none());
+        let recovered = service
+            .decrypt_secret(42, "totp", &sealed)
+            .unwrap_or_else(|error| panic!("secret must recover: {error}"));
+        assert_eq!(recovered, "JBSWY3DPEHPK3PXP");
+
+        // A different user cannot open it...
+        assert!(service.decrypt_secret(43, "totp", &sealed).is_err());
+        // ...and neither can a different domain.
+        assert!(service.decrypt_secret(42, "mfa_recovery", &sealed).is_err());
     }
 
     #[test]

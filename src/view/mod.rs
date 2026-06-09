@@ -101,6 +101,35 @@ pub struct UpdatePasswordTemplate {
 }
 
 #[derive(Template)]
+#[template(path = "mfa.htmlx", escape = "html")]
+pub struct MfaTemplate {
+    pub active_page: &'static str,
+    pub csrf_token: String,
+    pub show_acl: bool,
+    /// Whether two-factor is currently active for the signed-in operator.
+    pub enabled: bool,
+    pub remaining_recovery_codes: u64,
+    /// Shown after starting enrollment: the secret and provisioning URI plus the
+    /// code-confirmation form.
+    pub show_enroll: bool,
+    pub secret_base32: String,
+    pub otpauth_uri: String,
+    /// Shown exactly once after confirmation (or regeneration): the recovery codes.
+    pub show_recovery: bool,
+    pub recovery_codes: Vec<String>,
+    pub message: String,
+    pub message_class: &'static str,
+}
+
+#[derive(Template)]
+#[template(path = "mfa_challenge.html", escape = "html")]
+pub struct MfaChallengeTemplate<'a> {
+    pub product_name: &'a str,
+    pub csrf_token: &'a str,
+    pub error_message: &'a str,
+}
+
+#[derive(Template)]
 #[template(path = "show_attacks.htmlx", escape = "html")]
 pub struct ShowAttacksTemplate {
     pub active_page: &'static str,

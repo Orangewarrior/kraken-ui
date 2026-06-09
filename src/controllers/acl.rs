@@ -75,6 +75,9 @@ pub struct OperatorRow {
     email: String,
     user_type: String,
     status: &'static str,
+    /// Two-factor state for the "2MFA" column: "on" once the operator has
+    /// confirmed an authenticator, "off" otherwise.
+    mfa: &'static str,
     created_at: String,
 }
 
@@ -329,6 +332,11 @@ pub async fn api_operators(
             email: operator.email,
             user_type: operator.operator_type,
             status: "active",
+            mfa: if operator.mfa_enabled != 0 {
+                "on"
+            } else {
+                "off"
+            },
             created_at: operator.created_at,
         })
         .collect();

@@ -301,6 +301,24 @@ mod tests {
         ) -> anyhow::Result<PasswordVerification> {
             bail!("not used in this test")
         }
+
+        fn encrypt_secret(
+            &self,
+            _user_id: i32,
+            _domain: &str,
+            plaintext: &str,
+        ) -> anyhow::Result<String> {
+            Ok(plaintext.to_owned())
+        }
+
+        fn decrypt_secret(
+            &self,
+            _user_id: i32,
+            _domain: &str,
+            ciphertext: &str,
+        ) -> anyhow::Result<String> {
+            Ok(ciphertext.to_owned())
+        }
     }
 
     #[tokio::test]
@@ -346,6 +364,59 @@ mod tests {
         );
         assert!(response.headers().contains_key("content-security-policy"));
         assert!(response.headers().contains_key("strict-transport-security"));
+
+        let _ignored = tokio::fs::remove_file(database_path).await;
+    }
+
+    #[tokio::test]
+    async fn mfa_challenge_redirects_without_a_pending_session() {
+        let database_path = std::env::temp_dir().join(format!(
+            "kraken-ui-mfa-challenge-{}-{}.sqlite",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_nanos())
+                .unwrap_or_default()
+        ));
+        let config = AppConfig {
+            certificate_path: "unused-cert.pem".into(),
+            private_key_path: "unused-key.pem".into(),
+            listen: "127.0.0.1:3443".to_owned(),
+            database_path: database_path.clone(),
+            waf_database_path: None,
+            waf_endpoint: "https://127.0.0.1:8443".to_owned(),
+            waf_certificate_path: None,
+            log_directory: std::env::temp_dir(),
+            session_timeout_minutes: 30,
+        };
+        let application = AppFactory::new(config)
+            .with_password_crypto(Arc::new(TestPasswordCrypto))
+            .with_waf_metrics(
+                WafMetricsService::without_custom_ca("https://127.0.0.1:8444")
+                    .unwrap_or_else(|error| panic!("test metrics client must build: {error}")),
+            )
+            .build()
+            .await
+            .unwrap_or_else(|error| panic!("test application must build: {error}"));
+        let request = Request::builder()
+            .uri("/kraken_ui/auth/mfa_challenge")
+            .body(Body::empty())
+            .unwrap_or_else(|error| panic!("challenge request must be valid: {error}"));
+        let response = application
+            .oneshot(request)
+            .await
+            .unwrap_or_else(|error| panic!("challenge request must complete: {error}"));
+
+        // With no half-authenticated session there is nothing to challenge, so the
+        // page must send the visitor back to the login form rather than render.
+        assert!(response.status().is_redirection());
+        assert_eq!(
+            response
+                .headers()
+                .get("location")
+                .and_then(|value| value.to_str().ok()),
+            Some("/kraken_ui/login")
+        );
 
         let _ignored = tokio::fs::remove_file(database_path).await;
     }

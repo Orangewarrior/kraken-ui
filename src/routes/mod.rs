@@ -6,7 +6,7 @@ use axum::{
 use tower_http::services::ServeDir;
 
 use crate::{
-    controllers::{acl, auth, dashboard, health, setup, waf},
+    controllers::{acl, auth, dashboard, health, mfa, setup, waf},
     middleware::authentication::{require_admin, require_attack_viewer, require_operator},
     state::AppState,
 };
@@ -50,6 +50,12 @@ pub fn create(state: AppState) -> Router {
             "/kraken_ui/auth/update_password_action",
             post(acl::update_password_action),
         )
+        // Self-service two-factor management, open to admins and operators alike.
+        .route("/kraken_ui/auth/mfa", get(mfa::mfa_overview))
+        .route("/kraken_ui/auth/mfa_enroll", post(mfa::mfa_enroll))
+        .route("/kraken_ui/auth/mfa_confirm", post(mfa::mfa_confirm))
+        .route("/kraken_ui/auth/mfa_disable", post(mfa::mfa_disable))
+        .route("/kraken_ui/auth/mfa_regenerate", post(mfa::mfa_regenerate))
         .route("/kraken_ui/auth/logout", post(auth::logout))
         .route_layer(middleware::from_fn(require_operator));
 
@@ -70,6 +76,13 @@ pub fn create(state: AppState) -> Router {
         )
         .route("/kraken_ui/login", get(auth::login_page))
         .route("/kraken_ui/test_login", post(auth::login_submit))
+        // The two-factor challenge sits between a correct password and a full
+        // session; it authorises itself from the pending marker on the session.
+        .route(
+            "/kraken_ui/auth/mfa_challenge",
+            get(auth::mfa_challenge_page),
+        )
+        .route("/kraken_ui/auth/mfa_verify", post(auth::mfa_verify))
         .route("/kraken_ui/auth/first_time", post(setup::first_time))
         .route("/health", get(health::get))
         .nest_service("/static", ServeDir::new("src/view/static"))

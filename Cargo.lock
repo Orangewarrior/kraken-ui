@@ -299,6 +299,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "base32"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "022dfe9eb35f19ebbcb51e0b40a5ab759f46ad60cadf7297e0bd085afb50e076"
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1382,7 +1388,7 @@ dependencies = [
 
 [[package]]
 name = "kraken-ui"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "ammonia",
  "anyhow",
@@ -1395,6 +1401,7 @@ dependencies = [
  "chacha20poly1305",
  "dryoc",
  "memchr",
+ "otpauth",
  "reqwest",
  "rustls",
  "sea-orm",
@@ -1599,6 +1606,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7bb71e1b3fa6ca1c61f383464aaf2bb0e2f8e772a1f01d486832464de363b951"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "otpauth"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3c8c1db61c2fa935aee56c8596205f5bab57646ba13a61a39a30ec1984b3247"
+dependencies = [
+ "base32",
+ "ring",
 ]
 
 [[package]]
