@@ -114,9 +114,12 @@ pub struct MfaTemplate {
     pub show_enroll: bool,
     pub secret_base32: String,
     pub otpauth_uri: String,
+    pub otpauth_qr_data_url: String,
     /// Shown exactly once after confirmation (or regeneration): the recovery codes.
     pub show_recovery: bool,
     pub recovery_codes: Vec<String>,
+    pub recovery_codes_download_url: String,
+    pub recovery_codes_download_name: String,
     pub message: String,
     pub message_class: &'static str,
 }

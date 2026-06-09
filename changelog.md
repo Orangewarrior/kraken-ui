@@ -2,6 +2,38 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.10.1 - 2026-06-09
+
+A follow-up release that finishes the MFA enrolment UX and documents the new
+behaviour.
+
+### Added
+
+- **Server-rendered QR code for TOTP enrolment.** The two-factor setup page now
+  shows the `otpauth://` secret as a scannable QR image, rendered locally as an
+  inline SVG instead of relying on a third-party QR service or client-side
+  JavaScript.
+- **Optional recovery-code download.** Right after two-factor is confirmed (and
+  after recovery-code regeneration), the recovery-code page now offers a
+  `Download codes (.txt)` action that downloads the exact one-time codes being
+  shown on screen.
+
+### Changed
+
+- **Pending MFA enrolments survive a page revisit.** Returning to
+  `/kraken_ui/auth/mfa` while an enrolment is still unconfirmed now re-shows the
+  same QR code, provisioning URI and base32 secret instead of dropping the
+  in-progress setup.
+- **`GET /kraken_ui/auth/mfa_enroll` is no longer a dead-end URL.** Opening it
+  directly now redirects to `/kraken_ui/auth/mfa`, which makes manual navigation
+  and stale bookmarks land on the correct page.
+
+### Documentation
+
+- `docs/mfa.md` now documents the embedded QR code, the optional recovery-code
+  download, the pending-enrolment replay behaviour and the `GET /mfa_enroll`
+  redirect.
+
 ## 0.10.0 - 2026-06-09
 
 A feature release that adds optional two-factor authentication (TOTP) for every

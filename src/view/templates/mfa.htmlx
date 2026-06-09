@@ -10,6 +10,7 @@
       <h2>Save your recovery codes</h2>
       <p class="lead">Each code works once. Store them somewhere safe — they are the only way back in if you lose your authenticator. They are shown <strong>now and only now</strong>.</p>
       <ul class="recovery-code-list">{% for code in recovery_codes %}<li><code>{{ code }}</code></li>{% endfor %}</ul>
+      <a class="ghost-button" href="{{ recovery_codes_download_url }}" download="{{ recovery_codes_download_name }}">Download codes (.txt)</a>
       <a class="cta" href="/kraken_ui/auth/mfa">Done</a>
     </div>
 
@@ -17,7 +18,10 @@
     <div class="mfa-enroll">
       <h2>Set up your authenticator</h2>
       <p>Add this account to your authenticator app, then enter the 6-digit code it shows to finish enabling two-factor.</p>
-      <p>Scan or enter this provisioning URI:</p>
+      <div class="mfa-qr-card">
+        <img class="mfa-qr-image" src="{{ otpauth_qr_data_url }}" alt="Scan this QR code with your authenticator app" width="220" height="220">
+      </div>
+      <p>Scan the QR code above or enter this provisioning URI:</p>
       <p><code class="mfa-uri">{{ otpauth_uri }}</code></p>
       <p>Or enter this secret manually:</p>
       <p><code class="mfa-secret">{{ secret_base32 }}</code></p>

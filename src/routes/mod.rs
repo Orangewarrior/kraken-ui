@@ -3,6 +3,7 @@ use axum::{
     response::Redirect,
     routing::{get, post},
 };
+use std::path::PathBuf;
 use tower_http::services::ServeDir;
 
 use crate::{
@@ -12,6 +13,8 @@ use crate::{
 };
 
 pub fn create(state: AppState) -> Router {
+    let static_assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/view/static");
+
     // Routes only an administrator may reach: the full ACL management surface.
     let admin_routes = Router::new()
         .route("/kraken_ui/auth/insert_user", get(acl::insert_user))
@@ -52,7 +55,10 @@ pub fn create(state: AppState) -> Router {
         )
         // Self-service two-factor management, open to admins and operators alike.
         .route("/kraken_ui/auth/mfa", get(mfa::mfa_overview))
-        .route("/kraken_ui/auth/mfa_enroll", post(mfa::mfa_enroll))
+        .route(
+            "/kraken_ui/auth/mfa_enroll",
+            get(|| async { Redirect::to("/kraken_ui/auth/mfa") }).post(mfa::mfa_enroll),
+        )
         .route("/kraken_ui/auth/mfa_confirm", post(mfa::mfa_confirm))
         .route("/kraken_ui/auth/mfa_disable", post(mfa::mfa_disable))
         .route("/kraken_ui/auth/mfa_regenerate", post(mfa::mfa_regenerate))
@@ -85,7 +91,7 @@ pub fn create(state: AppState) -> Router {
         .route("/kraken_ui/auth/mfa_verify", post(auth::mfa_verify))
         .route("/kraken_ui/auth/first_time", post(setup::first_time))
         .route("/health", get(health::get))
-        .nest_service("/static", ServeDir::new("src/view/static"))
+        .nest_service("/static", ServeDir::new(static_assets_dir))
         .merge(admin_routes)
         .merge(operator_routes)
         .merge(attack_view_routes)

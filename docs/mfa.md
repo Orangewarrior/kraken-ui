@@ -59,19 +59,26 @@ Deleting an operator removes their secret and recovery codes automatically via
 From **User status → Two-factor auth** (`/kraken_ui/auth/mfa`):
 
 1. **Enable** starts enrolment: a fresh 160-bit secret is generated, stored
-   *unconfirmed*, and shown as both a base32 secret (for manual entry) and an
-   `otpauth://totp/...` provisioning URI. Add it to your authenticator app.
+   *unconfirmed*, and shown three ways:
+   - as an inline QR code rendered locally by the server,
+   - as a base32 secret for manual entry,
+   - and as the raw `otpauth://totp/...` provisioning URI.
+   Add the account to your authenticator app using any of the three.
 2. **Verify and enable** confirms the enrolment by checking a current 6-digit
    code (±1 step of clock skew is tolerated). On success `mfa_enabled` flips to
    `1`, `confirmed` flips to `1`, and **ten single-use recovery codes** are
    minted and shown once. Save them — they are the only way back in if you lose
-   your device.
+   your device. The page also offers an optional **Download codes (.txt)** link
+   that downloads exactly the codes being shown in that moment.
 3. **Regenerate recovery codes** mints a fresh set and invalidates the old one.
 4. **Disable** removes the secret and all recovery codes after you re-confirm
    your password.
 
 A mistyped confirmation code re-shows the *same* secret, so you never have to
 re-register the account in your app to retry.
+
+If an enrolment is still pending, revisiting `/kraken_ui/auth/mfa` re-shows that
+same QR code / secret / URI instead of silently discarding the in-progress setup.
 
 ## Signing in with two-factor
 
@@ -95,6 +102,7 @@ All paths are under `/kraken_ui/auth`.
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
 | GET  | `/mfa` | operator/admin | Two-factor management page |
+| GET  | `/mfa_enroll` | operator/admin | Redirect to `/mfa` (helps stray bookmarks / manual navigation) |
 | POST | `/mfa_enroll` | operator/admin | Begin enrolment (generate secret) |
 | POST | `/mfa_confirm` | operator/admin | Confirm a code and enable |
 | POST | `/mfa_disable` | operator/admin | Disable (re-confirms password) |
@@ -114,8 +122,11 @@ existing login events.
 
 ## Notes and limitations
 
-- There is no embedded QR image; the provisioning URI and base32 secret are shown
-  for the app's scan-from-clipboard or manual-entry flows. This keeps the strict
-  Content-Security-Policy and the zero-runtime-dependency browser posture intact.
+- The QR code is rendered locally as an inline SVG data URL. No third-party QR
+  service, remote image host or client-side QR generator is involved, so the
+  strict Content-Security-Policy and the no-CDN browser posture stay intact.
+- The recovery-code download is generated as a one-shot `data:` URL in the page
+  that already shows the codes. The server does not persist a separate export
+  artifact.
 - Throttling state is process-local, like the password throttle; a multi-replica
   deployment should front it with a shared store.

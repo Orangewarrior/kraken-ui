@@ -6,6 +6,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use axum_csrf::CsrfToken;
+use base64::{Engine, engine::general_purpose::STANDARD};
+use qrcode::{QrCode, render::svg};
 use serde::Deserialize;
 use tower_sessions::Session;
 use zeroize::Zeroizing;
@@ -49,6 +51,20 @@ pub async fn mfa_overview(
     let Some(operator) = current_operator(&state, &session).await? else {
         return Ok(StatusCode::UNAUTHORIZED.into_response());
     };
+    if let Some(enrollment) = mfa_repository(&state)
+        .pending_enrollment(operator.id_user, &operator.username)
+        .await?
+    {
+        return render_enroll(
+            token,
+            &operator,
+            enrollment.secret_base32,
+            enrollment.otpauth_uri,
+            "Finish confirming the current authenticator code to enable two-factor."
+                .to_owned(),
+            "",
+        );
+    }
     render_overview(&state, token, &operator, String::new(), "").await
 }
 
@@ -285,8 +301,11 @@ async fn render_overview(
         show_enroll: false,
         secret_base32: String::new(),
         otpauth_uri: String::new(),
+        otpauth_qr_data_url: String::new(),
         show_recovery: false,
         recovery_codes: Vec::new(),
+        recovery_codes_download_url: String::new(),
+        recovery_codes_download_name: String::new(),
         message,
         message_class,
     })
@@ -300,6 +319,7 @@ fn render_enroll(
     message: String,
     message_class: &'static str,
 ) -> Result<Response, AppError> {
+    let otpauth_qr_data_url = qr_code_data_url(&otpauth_uri).map_err(AppError::internal)?;
     render_with_csrf(token, |csrf_token| MfaTemplate {
         active_page: nav::USER_STATUS,
         csrf_token,
@@ -309,8 +329,11 @@ fn render_enroll(
         show_enroll: true,
         secret_base32,
         otpauth_uri,
+        otpauth_qr_data_url,
         show_recovery: false,
         recovery_codes: Vec::new(),
+        recovery_codes_download_url: String::new(),
+        recovery_codes_download_name: String::new(),
         message,
         message_class,
     })
@@ -322,6 +345,8 @@ fn render_recovery(
     recovery_codes: Vec<String>,
     message: String,
 ) -> Result<Response, AppError> {
+    let recovery_codes_download_url = recovery_codes_download_data_url(&recovery_codes);
+    let recovery_codes_download_name = format!("krakenwaf-recovery-codes-{}.txt", operator.username);
     render_with_csrf(token, |csrf_token| MfaTemplate {
         active_page: nav::USER_STATUS,
         csrf_token,
@@ -331,8 +356,11 @@ fn render_recovery(
         show_enroll: false,
         secret_base32: String::new(),
         otpauth_uri: String::new(),
+        otpauth_qr_data_url: String::new(),
         show_recovery: true,
         recovery_codes,
+        recovery_codes_download_url,
+        recovery_codes_download_name,
         message,
         message_class: "success",
     })
@@ -359,4 +387,81 @@ fn audit_mfa_event(action: &str, id_user: i32, username: &str) {
         username = %username,
         "two-factor administration action"
     );
+}
+
+fn qr_code_data_url(otpauth_uri: &str) -> anyhow::Result<String> {
+    let qr_svg = QrCode::new(otpauth_uri.as_bytes())
+        .map_err(|error| anyhow!("failed to encode TOTP provisioning URI as QR code: {error}"))?
+        .render::<svg::Color<'_>>()
+        .min_dimensions(220, 220)
+        .dark_color(svg::Color("#101418"))
+        .light_color(svg::Color("#ffffff"))
+        .build();
+    Ok(format!(
+        "data:image/svg+xml;base64,{}",
+        STANDARD.encode(qr_svg.as_bytes())
+    ))
+}
+
+fn recovery_codes_download_data_url(recovery_codes: &[String]) -> String {
+    let file_contents = format!(
+        "KrakenWAF recovery codes\n\n{}\n",
+        recovery_codes.join("\n")
+    );
+    format!(
+        "data:text/plain;charset=utf-8;base64,{}",
+        STANDARD.encode(file_contents.as_bytes())
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+
+    use super::{qr_code_data_url, recovery_codes_download_data_url};
+
+    #[test]
+    fn encodes_the_otpauth_uri_as_an_inline_svg_image() {
+        let data_url = qr_code_data_url(
+            "otpauth://totp/KrakenWAF:admin?secret=JBSWY3DPEHPK3PXP&issuer=KrakenWAF",
+        )
+        .unwrap_or_else(|error| panic!("QR code data URL must be generated: {error}"));
+
+        assert!(data_url.starts_with("data:image/svg+xml;base64,"));
+
+        let encoded = data_url
+            .strip_prefix("data:image/svg+xml;base64,")
+            .unwrap_or_else(|| panic!("data URL must contain the expected SVG prefix"));
+        let svg = STANDARD
+            .decode(encoded)
+            .unwrap_or_else(|error| panic!("SVG payload must be base64: {error}"));
+        let svg = String::from_utf8(svg)
+            .unwrap_or_else(|error| panic!("SVG payload must be valid UTF-8: {error}"));
+
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("<path"));
+    }
+
+    #[test]
+    fn encodes_recovery_codes_as_a_downloadable_text_file() {
+        let data_url = recovery_codes_download_data_url(&[
+            "ABCD-EFGH".to_owned(),
+            "JKLM-NPQR".to_owned(),
+        ]);
+
+        assert!(data_url.starts_with("data:text/plain;charset=utf-8;base64,"));
+
+        let encoded = data_url
+            .strip_prefix("data:text/plain;charset=utf-8;base64,")
+            .unwrap_or_else(|| panic!("data URL must contain the expected text prefix"));
+        let decoded = STANDARD
+            .decode(encoded)
+            .unwrap_or_else(|error| panic!("text payload must be base64: {error}"));
+        let decoded = String::from_utf8(decoded)
+            .unwrap_or_else(|error| panic!("text payload must be valid UTF-8: {error}"));
+
+        assert!(decoded.contains("KrakenWAF recovery codes"));
+        assert!(decoded.contains("ABCD-EFGH"));
+        assert!(decoded.contains("JKLM-NPQR"));
+    }
 }
