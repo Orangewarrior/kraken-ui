@@ -8,7 +8,7 @@ use sea_orm::{
 use zeroize::Zeroizing;
 
 use crate::{
-    models::{like_contains, operator},
+    models::{current_timestamp, like_contains, operator},
     services::password_crypto::{PasswordCryptoService, spawn_encrypt},
 };
 
@@ -99,6 +99,7 @@ impl OperatorRepository {
             email: Set(input.email.to_owned()),
             operator_type: Set(input.operator_type.to_owned()),
             encrypted_password_hash: Set("transaction-pending".to_owned()),
+            mfa_enabled: NotSet,
             created_at: Set(timestamp.clone()),
             updated_at: Set(timestamp),
         }
@@ -238,13 +239,6 @@ impl OperatorRepository {
     }
 }
 
-pub fn current_timestamp() -> String {
-    use time::format_description::well_known::Rfc3339;
-    time::OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -274,6 +268,28 @@ mod tests {
                 valid: true,
                 replacement_record: None,
             })
+        }
+
+        fn encrypt_secret(
+            &self,
+            user_id: i32,
+            domain: &str,
+            plaintext: &str,
+        ) -> anyhow::Result<String> {
+            Ok(format!("sec:{user_id}:{domain}:{plaintext}"))
+        }
+
+        fn decrypt_secret(
+            &self,
+            user_id: i32,
+            domain: &str,
+            ciphertext: &str,
+        ) -> anyhow::Result<String> {
+            let prefix = format!("sec:{user_id}:{domain}:");
+            Ok(ciphertext
+                .strip_prefix(&prefix)
+                .unwrap_or(ciphertext)
+                .to_owned())
         }
     }
 

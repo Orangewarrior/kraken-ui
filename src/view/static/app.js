@@ -335,6 +335,7 @@
       cell(item.email),
       badgeCell(item.user_type),
       badgeCell(item.status),
+      badgeCell(item.mfa),
       cell(item.created_at),
       postActionCell("/kraken_ui/auth/edit_user", "id_user", item.id, csrfToken, "Edit", "table-icon edit-icon", true, false),
       postActionCell("/kraken_ui/auth/delete_user_action", "user_identity", item.id, csrfToken, "X", "table-icon delete-icon", false, true)
@@ -383,7 +384,7 @@
     ],
     users: [
       ["id", "ID"], ["username", "Username"], ["email", "Email"],
-      ["user_type", "Type"], ["status", "Status"], ["created_at", "Created"]
+      ["user_type", "Type"], ["status", "Status"], ["mfa", "2MFA"], ["created_at", "Created"]
     ]
   };
 

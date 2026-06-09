@@ -64,6 +64,7 @@ async fn initialize_schema(database: &DatabaseConnection) -> anyhow::Result<()> 
                 type VARCHAR(32) NOT NULL
                     CHECK (type IN ('admin', 'operator', 'auditor')),
                 encrypted_password_hash VARCHAR(1024) NOT NULL,
+                mfa_enabled INTEGER NOT NULL DEFAULT 0,
                 created_at TIMESTAMP NOT NULL,
                 updated_at TIMESTAMP NOT NULL
             )
@@ -71,5 +72,63 @@ async fn initialize_schema(database: &DatabaseConnection) -> anyhow::Result<()> 
         ))
         .await
         .context("unable to initialize operators table")?;
+    // Bring forward databases created before the two-factor flag existed. SQLite
+    // has no "ADD COLUMN IF NOT EXISTS", so a duplicate-column error on an
+    // already-migrated table is expected and ignored.
+    let _ = database
+        .execute(Statement::from_string(
+            DbBackend::Sqlite,
+            "ALTER TABLE operators ADD COLUMN mfa_enabled INTEGER NOT NULL DEFAULT 0",
+        ))
+        .await;
+
+    // The confirmed TOTP shared secret for an operator, one row per account. The
+    // secret is sealed at rest by the password-crypto envelope; `confirmed` flips
+    // to 1 only once the operator proves possession by entering a valid code.
+    database
+        .execute(Statement::from_string(
+            DbBackend::Sqlite,
+            r#"
+            CREATE TABLE IF NOT EXISTS operator_mfa_totp (
+                id_totp INTEGER PRIMARY KEY AUTOINCREMENT,
+                id_user INTEGER NOT NULL UNIQUE,
+                encrypted_secret VARCHAR(1024) NOT NULL,
+                confirmed INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP NOT NULL,
+                confirmed_at TIMESTAMP,
+                FOREIGN KEY (id_user) REFERENCES operators (id_user) ON DELETE CASCADE
+            )
+            "#,
+        ))
+        .await
+        .context("unable to initialize operator_mfa_totp table")?;
+
+    // Single-use recovery codes, sealed at rest like the TOTP secret. Each code is
+    // burned (`used` = 1) the first time it authenticates a login.
+    database
+        .execute(Statement::from_string(
+            DbBackend::Sqlite,
+            r#"
+            CREATE TABLE IF NOT EXISTS operator_mfa_recovery_codes (
+                id_code INTEGER PRIMARY KEY AUTOINCREMENT,
+                id_user INTEGER NOT NULL,
+                encrypted_code VARCHAR(1024) NOT NULL,
+                used INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP NOT NULL,
+                used_at TIMESTAMP,
+                FOREIGN KEY (id_user) REFERENCES operators (id_user) ON DELETE CASCADE
+            )
+            "#,
+        ))
+        .await
+        .context("unable to initialize operator_mfa_recovery_codes table")?;
+    database
+        .execute(Statement::from_string(
+            DbBackend::Sqlite,
+            "CREATE INDEX IF NOT EXISTS idx_operator_mfa_recovery_user \
+             ON operator_mfa_recovery_codes (id_user)",
+        ))
+        .await
+        .context("unable to create the recovery-codes user index")?;
     Ok(())
 }

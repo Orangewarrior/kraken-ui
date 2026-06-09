@@ -11,6 +11,10 @@ pub struct Model {
     #[sea_orm(column_name = "type")]
     pub operator_type: String,
     pub encrypted_password_hash: String,
+    /// Two-factor (TOTP) status flag: 0 while disabled, 1 once an operator has
+    /// confirmed an authenticator. Surfaced as the "2MFA" column in the users
+    /// table.
+    pub mfa_enabled: i32,
     pub created_at: String,
     pub updated_at: String,
 }

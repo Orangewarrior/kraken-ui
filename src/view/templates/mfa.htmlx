@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>KrakenWAF - Two-factor authentication</title><link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script></head>
+<body data-page="mfa"><div class="shell admin-shell">{% include "admin_sidebar.html" %}<main class="page admin-content">
+  <section class="page-hero compact-hero"><span class="badge">User status</span><h1>Two-factor authentication</h1><p class="lead">Protect your account with a time-based one-time password (TOTP) from an authenticator app.</p></section>
+  <section class="panel form-panel">
+    {% if message != "" %}<p class="form-message {{ message_class }}" role="status">{{ message }}</p>{% endif %}
+
+    {% if show_recovery %}
+    <div class="mfa-recovery">
+      <h2>Save your recovery codes</h2>
+      <p class="lead">Each code works once. Store them somewhere safe — they are the only way back in if you lose your authenticator. They are shown <strong>now and only now</strong>.</p>
+      <ul class="recovery-code-list">{% for code in recovery_codes %}<li><code>{{ code }}</code></li>{% endfor %}</ul>
+      <a class="cta" href="/kraken_ui/auth/mfa">Done</a>
+    </div>
+
+    {% else if show_enroll %}
+    <div class="mfa-enroll">
+      <h2>Set up your authenticator</h2>
+      <p>Add this account to your authenticator app, then enter the 6-digit code it shows to finish enabling two-factor.</p>
+      <p>Scan or enter this provisioning URI:</p>
+      <p><code class="mfa-uri">{{ otpauth_uri }}</code></p>
+      <p>Or enter this secret manually:</p>
+      <p><code class="mfa-secret">{{ secret_base32 }}</code></p>
+      <form class="login-form management-form" method="post" action="/kraken_ui/auth/mfa_confirm" autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="field-group"><label for="code">Verification code</label><input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" required minlength="6" maxlength="6" pattern="[0-9]{6}" placeholder="123456"></div>
+        <button class="cta" type="submit">Verify and enable</button>
+      </form>
+    </div>
+
+    {% else if enabled %}
+    <div class="mfa-status">
+      <p class="form-message success" role="status">Two-factor authentication is <strong>enabled</strong> on your account.</p>
+      <p>You have <strong>{{ remaining_recovery_codes }}</strong> unused recovery code(s).</p>
+      <form class="management-form" method="post" action="/kraken_ui/auth/mfa_regenerate">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="ghost-button" type="submit">Regenerate recovery codes</button>
+      </form>
+      <h2>Disable two-factor</h2>
+      <p>Confirm your password to turn two-factor authentication off.</p>
+      <form class="login-form management-form" method="post" action="/kraken_ui/auth/mfa_disable" autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="field-group"><label for="current_password">Current password</label><input id="current_password" name="current_password" type="password" required maxlength="256" autocomplete="current-password"></div>
+        <button class="cta danger" type="submit">Disable two-factor</button>
+      </form>
+    </div>
+
+    {% else %}
+    <div class="mfa-status">
+      <p class="form-message" role="status">Two-factor authentication is <strong>disabled</strong> on your account.</p>
+      <p>Enabling it adds a one-time code from your authenticator app to every sign-in.</p>
+      <form class="management-form" method="post" action="/kraken_ui/auth/mfa_enroll">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="cta" type="submit">Enable two-factor</button>
+      </form>
+    </div>
+    {% endif %}
+  </section>
+</main></div></body></html>

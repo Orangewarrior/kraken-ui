@@ -2,6 +2,50 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.10.0 - 2026-06-09
+
+A feature release that adds optional two-factor authentication (TOTP) for every
+operator, and makes stored timestamps compact and uniform.
+
+### Added
+
+- **Two-factor authentication (TOTP).** Operators and administrators can now
+  protect their account with a time-based one-time password from any standard
+  authenticator app, built on the [`otpauth`](https://crates.io/crates/otpauth)
+  crate. A new **User status → Two-factor auth** page lets each operator enrol
+  (scan/enter the secret, confirm a code), regenerate recovery codes, and
+  disable two-factor after re-confirming their password. Enrolling mints ten
+  single-use recovery codes, shown exactly once.
+- **A second step at sign-in.** When two-factor is enabled, a correct password
+  no longer completes the login on its own: it parks a half-authenticated
+  marker on the session and redirects to a code challenge. No authenticated role
+  is granted until a valid TOTP code — or a single-use recovery code — is
+  entered. The challenge is throttled per source IP and account, exactly like
+  the password step.
+- **Two new tables.** `operator_mfa_totp` holds one TOTP secret per operator and
+  `operator_mfa_recovery_codes` holds the single-use recovery codes; both
+  reference `operators(id_user)` with `ON DELETE CASCADE`. The TOTP secret and
+  every recovery code are sealed at rest in the same XChaCha20-Poly1305 envelope
+  used for password hashes, bound to the user id and a purpose-specific AAD so a
+  record cannot be replayed against another account or repurposed.
+- **A `2MFA` column** on `operators` (`mfa_enabled`, integer, default `0`) and in
+  the **ACL → Users table**, so an administrator can see at a glance which
+  accounts have two-factor enabled. The column is included in the CSV export.
+
+### Changed
+
+- **Timestamps are stored as `YYYY-MM-DD HH:MM:SS`.** Every `created_at` /
+  `updated_at` (and the new `confirmed_at` / `used_at`) column is now written in
+  a fixed-width, second-precision UTC form instead of RFC 3339. This keeps the
+  DataTables date columns compact on the users table. Existing databases are
+  migrated in place (the new columns are added with safe defaults on startup).
+
+### Documentation
+
+- New [`docs/mfa.md`](docs/mfa.md) covering the enrolment, challenge and recovery
+  flows, the storage model and the security properties. `docs/database.md` and
+  the README are updated for the new tables, column and routes.
+
 ## 0.9.0 - 2026-06-08
 
 A security-hardening release: live sessions can no longer outlast the authority

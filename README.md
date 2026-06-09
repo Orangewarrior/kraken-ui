@@ -17,6 +17,10 @@ inline JavaScript.
 - **Defence in depth on passwords.** Argon2id hashing (libsodium-compatible)
   wrapped in an XChaCha20-Poly1305 envelope with a per-user AAD, so a hash can
   never be replayed against another account; plaintext is held in `Zeroizing`.
+- **Optional two-factor authentication.** Any operator can protect their account
+  with a TOTP authenticator app and single-use recovery codes. Secrets and codes
+  are sealed in the same per-user envelope as passwords. See
+  [docs/mfa.md](docs/mfa.md).
 - **Auditable.** Authentication and operator-administration events are written
   to a dedicated `audit.jsonl`, and the WAF metrics channel is pinned to the
   certificate you configure.
@@ -115,7 +119,8 @@ Then sign in at `https://host:port/kraken_ui/login`.
 | Dashboard   | `/kraken_ui/auth/admin_panel`, `/kraken_ui/auth/dashboard` |
 | Operators   | `/kraken_ui/auth/insert_user`, `/delete_user`, `/edit_user`, `/show_user_table` |
 | Monitoring  | `/kraken_ui/auth/show_attacks`, `/kraken_ui/auth/view_waf_request/?id=<id>` |
-| Account     | `/kraken_ui/auth/update_password` |
+| Account     | `/kraken_ui/auth/update_password`, `/kraken_ui/auth/mfa` |
+| Two-factor  | `/kraken_ui/auth/mfa_challenge`, `/kraken_ui/auth/mfa_verify` (sign-in challenge) |
 
 ### Roles
 
@@ -185,6 +190,7 @@ For the bigger picture, see the [`docs/`](docs/) directory:
 - [Security](docs/security.md) — the controls and why they exist.
 - [Security review](docs/security-review.md) — standing findings and their status.
 - [Database & ACL](docs/database.md) — schema, sessions and routes.
+- [Two-factor authentication](docs/mfa.md) — TOTP enrolment, sign-in and recovery.
 - [Operations](docs/operations.md) — configuration, env vars, logs and limits.
 - [Dependency licences](docs/dependency-licenses.md) — the licence policy.
 

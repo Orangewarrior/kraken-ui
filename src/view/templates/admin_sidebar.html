@@ -43,6 +43,7 @@
       </button>
       <div class="submenu" id="user-menu">
         <a href="/kraken_ui/auth/update_password">Change password</a>
+        <a href="/kraken_ui/auth/mfa">Two-factor auth</a>
         <form action="/kraken_ui/auth/logout" method="post">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <button class="submenu-button" type="submit">Logout</button>
