@@ -139,9 +139,10 @@ Clicking the **ID** or **client IP** column of the attacks table opens
 `view_waf_request` in a new tab. It shows the full finding — title, colour-coded
 severity, CWE, description, reference, a human-readable timestamp, rule match,
 client IP, URI and fullpath evidence — and, last, the WAF `request_payload` in a
-light-themed, syntax-highlighted code box. The payload is sanitised with Ammonia
-server-side and highlighted client-side by building DOM nodes only (no
-`innerHTML`), so it stays within the strict CSP.
+light-themed, syntax-highlighted code box. The payload is rendered through the
+template's default HTML escaping — never Ammonia-stripped, so the exact attacker
+bytes are preserved — and highlighted client-side by building DOM nodes only (no
+`innerHTML`), so it stays inert within the strict CSP.
 
 ## Screenshots
 
@@ -167,7 +168,7 @@ the top blocking countries and IPs — all charted as local SVG.
 
 Opened from the attacks table by clicking an attack's **ID** or **client IP**:
 the full finding with colour-coded severity, CWE, description, rule match, URI
-and the Ammonia-sanitised, syntax-highlighted request/response payload.
+and the HTML-escaped, syntax-highlighted request/response payload.
 
 ![Kraken UI single-attack request and response detail](docs/img/attack-detail.png)
 

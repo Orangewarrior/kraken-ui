@@ -1,0 +1,17 @@
+# Keeps the supply chain current and lets Dependabot pin GitHub Actions to commit
+# SHAs as it proposes updates. See docs/security-review.md.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps

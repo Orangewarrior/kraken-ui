@@ -78,16 +78,25 @@ impl OperatorMfaRepository {
             .context("failed to query the operator TOTP record")
     }
 
+    /// Returns the operator's TOTP row only when two-factor is confirmed; `None`
+    /// for a pending or absent enrollment.
+    async fn confirmed_totp_row(&self, id_user: i32) -> anyhow::Result<Option<totp::Model>> {
+        Ok(self
+            .totp_row(id_user)
+            .await?
+            .filter(|row| row.confirmed != 0))
+    }
+
     /// Returns the decrypted base32 secret only when two-factor is confirmed for
     /// the operator; `None` for a pending or absent enrollment.
     async fn confirmed_secret(&self, id_user: i32) -> anyhow::Result<Option<String>> {
-        match self.totp_row(id_user).await? {
-            Some(row) if row.confirmed != 0 => Ok(Some(self.password_crypto.decrypt_secret(
+        match self.confirmed_totp_row(id_user).await? {
+            Some(row) => Ok(Some(self.password_crypto.decrypt_secret(
                 id_user,
                 TOTP_DOMAIN,
                 &row.encrypted_secret,
             )?)),
-            _ => Ok(None),
+            None => Ok(None),
         }
     }
 
@@ -154,6 +163,7 @@ impl OperatorMfaRepository {
             confirmed: Set(0),
             created_at: Set(current_timestamp()),
             confirmed_at: Set(None),
+            last_used_step: NotSet,
         }
         .insert(&self.database)
         .await
@@ -204,13 +214,16 @@ impl OperatorMfaRepository {
         let secret_base32 =
             self.password_crypto
                 .decrypt_secret(id_user, TOTP_DOMAIN, &row.encrypted_secret)?;
-        if !verify_totp_code(&secret_base32, code) {
+        let Some(step) = verify_totp_code(&secret_base32, code) else {
             return Ok(ConfirmOutcome::InvalidCode);
-        }
+        };
 
         let mut active = row.into_active_model();
         active.confirmed = Set(1);
         active.confirmed_at = Set(Some(current_timestamp()));
+        // Burn the confirming code's step as well, so it cannot be replayed at the
+        // login challenge during the few seconds it remains valid.
+        active.last_used_step = Set(step as i64);
         active
             .update(&self.database)
             .await
@@ -252,10 +265,25 @@ impl OperatorMfaRepository {
     /// Verifies a code presented at the login challenge: first as a live TOTP code,
     /// then as a single-use recovery code (which is burned on success).
     pub async fn verify_login_code(&self, id_user: i32, code: &str) -> anyhow::Result<bool> {
-        if let Some(secret_base32) = self.confirmed_secret(id_user).await?
-            && verify_totp_code(&secret_base32, code)
-        {
-            return Ok(true);
+        if let Some(row) = self.confirmed_totp_row(id_user).await? {
+            let secret_base32 =
+                self.password_crypto
+                    .decrypt_secret(id_user, TOTP_DOMAIN, &row.encrypted_secret)?;
+            if let Some(step) = verify_totp_code(&secret_base32, code) {
+                // A correct code whose step was already consumed is a replay: refuse
+                // it. A six-digit numeric can never match a recovery code, so there
+                // is nothing to gain by falling through.
+                if (step as i64) <= row.last_used_step {
+                    return Ok(false);
+                }
+                let mut active = row.into_active_model();
+                active.last_used_step = Set(step as i64);
+                active
+                    .update(&self.database)
+                    .await
+                    .context("failed to record the used TOTP step")?;
+                return Ok(true);
+            }
         }
         self.consume_recovery_code(id_user, code).await
     }
@@ -339,22 +367,24 @@ impl OperatorMfaRepository {
 
 /// Verifies a six-digit TOTP code against a base32 secret, tolerating one step of
 /// clock skew on either side so a code entered near a period boundary still works.
-fn verify_totp_code(secret_base32: &str, code: &str) -> bool {
+/// Returns the matching time-step (`unix_time / period`) so the caller can record
+/// it and refuse a later replay of the same code; `None` if it does not match.
+fn verify_totp_code(secret_base32: &str, code: &str) -> Option<u64> {
     let trimmed = code.trim();
     if trimmed.len() != 6 || !trimmed.bytes().all(|byte| byte.is_ascii_digit()) {
-        return false;
+        return None;
     }
-    let Ok(code_num) = trimmed.parse::<u32>() else {
-        return false;
-    };
-    let Some(totp) = otpauth::TOTP::from_base32(secret_base32.to_owned()) else {
-        return false;
-    };
+    let code_num = trimmed.parse::<u32>().ok()?;
+    let totp = otpauth::TOTP::from_base32(secret_base32.to_owned())?;
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let step = TOTP_PERIOD as i64;
-    [-step, 0, step].into_iter().any(|delta| {
+    [-step, 0, step].into_iter().find_map(|delta| {
         let timestamp = now + delta;
-        timestamp >= 0 && totp.verify(code_num, TOTP_PERIOD, timestamp as u64)
+        if timestamp >= 0 && totp.verify(code_num, TOTP_PERIOD, timestamp as u64) {
+            Some(timestamp as u64 / TOTP_PERIOD)
+        } else {
+            None
+        }
     })
 }
 
@@ -472,10 +502,14 @@ mod tests {
     }
 
     fn current_code(secret_base32: &str) -> String {
+        let now = time::OffsetDateTime::now_utc().unix_timestamp() as u64;
+        code_at(secret_base32, now)
+    }
+
+    fn code_at(secret_base32: &str, timestamp: u64) -> String {
         let totp = otpauth::TOTP::from_base32(secret_base32.to_owned())
             .unwrap_or_else(|| panic!("secret must decode"));
-        let now = time::OffsetDateTime::now_utc().unix_timestamp() as u64;
-        format!("{:06}", totp.generate(TOTP_PERIOD, now))
+        format!("{:06}", totp.generate(TOTP_PERIOD, timestamp))
     }
 
     async fn operator_flag(database: &sea_orm::DatabaseConnection, id_user: i32) -> i32 {
@@ -530,20 +564,29 @@ mod tests {
         let (database, path, id_user) = fixture().await;
         let mfa = OperatorMfaRepository::new(database.clone(), Arc::new(TestCrypto));
         let enrollment = mfa.begin_enrollment(id_user, "admin").await.unwrap();
+        let now = time::OffsetDateTime::now_utc().unix_timestamp() as u64;
+        // Confirm with the current code; confirmation also burns its time-step.
         let ConfirmOutcome::Confirmed { recovery_codes } = mfa
-            .confirm(id_user, &current_code(&enrollment.secret_base32))
+            .confirm(id_user, &code_at(&enrollment.secret_base32, now))
             .await
             .unwrap()
         else {
             panic!("enrollment must confirm");
         };
 
-        // A live TOTP code authenticates the login challenge.
+        // Replaying the confirming code at the login challenge is refused, because
+        // its step was already consumed.
         assert!(
-            mfa.verify_login_code(id_user, &current_code(&enrollment.secret_base32))
+            !mfa.verify_login_code(id_user, &code_at(&enrollment.secret_base32, now))
                 .await
                 .unwrap()
         );
+
+        // A code from the next time-step authenticates once...
+        let fresh = code_at(&enrollment.secret_base32, now + TOTP_PERIOD);
+        assert!(mfa.verify_login_code(id_user, &fresh).await.unwrap());
+        // ...and then it, too, cannot be replayed.
+        assert!(!mfa.verify_login_code(id_user, &fresh).await.unwrap());
 
         // A recovery code works once, and only once.
         let recovery = recovery_codes[0].clone();

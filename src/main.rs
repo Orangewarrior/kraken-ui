@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use anyhow::Context;
 use axum_server::tls_rustls::RustlsConfig;
 use kraken_ui::{AppFactory, config::AppConfig};

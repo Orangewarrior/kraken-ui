@@ -35,6 +35,7 @@ CREATE TABLE operator_mfa_totp (
     confirmed INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL,
     confirmed_at TIMESTAMP,
+    last_used_step INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (id_user) REFERENCES operators (id_user) ON DELETE CASCADE
 );
 
@@ -50,7 +51,9 @@ CREATE TABLE operator_mfa_recovery_codes (
 ```
 
 The TOTP secret and recovery codes are sealed at rest in the password-crypto
-envelope (bound to the user id and a purpose AAD). Full details — the enrolment,
+envelope (bound to the user id and a purpose AAD). `last_used_step` records the
+highest TOTP time-step that has already authenticated the account, so a code
+cannot be replayed inside its validity window. Full details — the enrolment,
 sign-in challenge and recovery flows — are in [docs/mfa.md](mfa.md).
 
 ## Sessions
@@ -61,19 +64,22 @@ Sessions are persisted by `SeaOrmSessionStore` in the same SQLite database:
 CREATE TABLE kraken_sessions (
     id TEXT PRIMARY KEY NOT NULL,
     record TEXT NOT NULL,      -- the serialised session record (JSON)
-    expiry_utc INTEGER NOT NULL
+    expiry_utc INTEGER NOT NULL,
+    user_id INTEGER NOT NULL DEFAULT 0   -- mirrors the signed-in operator
 );
 ```
 
 Records past their `expiry_utc` are ignored on load and pruned whenever a new
 session is created, so the table stays bounded. Deleting a row immediately
-revokes that session.
+revokes that session, and the indexed `user_id` column lets every session for
+one operator be revoked at once — on delete, role change or password change.
 
 ## Public routes
 
 - `GET /kraken_ui/login` — the login form.
-- `POST /kraken_ui/test_login` — validates CSRF, looks up the operator, calls
-  the crypto service and creates a session for `admin` accounts only.
+- `POST /kraken_ui/login` — validates CSRF, looks up the operator, calls the
+  crypto service and creates a session (or, when two-factor is enabled, a
+  half-authenticated challenge) for `admin` and `operator` accounts.
 - `POST /kraken_ui/auth/first_time` — one-shot administrator bootstrap, limited
   to loopback clients and closed once any operator exists.
 - `GET /kraken_ui/auth/mfa_challenge` — the two-factor code form, reachable only

@@ -15,6 +15,11 @@ pub struct Model {
     pub confirmed: i32,
     pub created_at: String,
     pub confirmed_at: Option<String>,
+    /// The highest TOTP time-step (`unix_time / period`) that has already
+    /// authenticated this account. A presented code is accepted only when its
+    /// step is strictly greater, so a code cannot be replayed inside its skew
+    /// window (RFC 6238 §5.2). `0` until the first successful verification.
+    pub last_used_step: i64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

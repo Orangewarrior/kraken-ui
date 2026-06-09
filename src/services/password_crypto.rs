@@ -1,4 +1,8 @@
-use std::{env, path::Path, sync::Arc};
+use std::{
+    env,
+    path::Path,
+    sync::{Arc, LazyLock},
+};
 
 use anyhow::{Context, bail};
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -12,6 +16,7 @@ use dryoc::{
     },
     constants::{CRYPTO_PWHASH_MEMLIMIT_MODERATE, CRYPTO_PWHASH_OPSLIMIT_MODERATE},
 };
+use tokio::sync::{Semaphore, SemaphorePermit};
 use zeroize::Zeroizing;
 
 const KEY_BYTES: usize = 32;
@@ -63,7 +68,7 @@ pub struct PasswordVerification {
 
 pub struct DryocPasswordCryptoService {
     key_id: [u8; KEY_ID_BYTES],
-    key: Zeroizing<[u8; KEY_BYTES]>,
+    cipher: XChaCha20Poly1305,
     dummy_record: String,
 }
 
@@ -86,12 +91,18 @@ impl DryocPasswordCryptoService {
         let key_bytes = STANDARD
             .decode(encoded_key)
             .context("password encryption key must be valid base64")?;
-        let key_array: [u8; KEY_BYTES] = key_bytes.try_into().map_err(|_| {
-            anyhow::anyhow!("password encryption key must decode to exactly {KEY_BYTES} bytes")
-        })?;
+        let key_array: Zeroizing<[u8; KEY_BYTES]> =
+            Zeroizing::new(key_bytes.try_into().map_err(|_| {
+                anyhow::anyhow!("password encryption key must decode to exactly {KEY_BYTES} bytes")
+            })?);
+        // Build the AEAD cipher once and keep it: the key schedule is then derived
+        // a single time rather than on every encrypt/decrypt, and the raw key bytes
+        // are wiped as `key_array` drops (the cipher zeroizes its own copy on drop).
+        let cipher = XChaCha20Poly1305::new_from_slice(key_array.as_ref())
+            .map_err(|_| anyhow::anyhow!("unable to construct XChaCha20-Poly1305 key"))?;
         let mut service = Self {
             key_id: normalize_key_id(key_id)?,
-            key: Zeroizing::new(key_array),
+            cipher,
             dummy_record: String::new(),
         };
         // Precompute a real encrypted Argon2id record once, so the dummy
@@ -112,12 +123,11 @@ impl DryocPasswordCryptoService {
     /// `aad`. Shared by the password-hash and the reversible-secret paths so the
     /// envelope format and its authenticated additional data stay in one place.
     fn encrypt_with_aad(&self, aad: &str, plaintext: &str) -> anyhow::Result<String> {
-        let cipher = XChaCha20Poly1305::new_from_slice(self.key.as_ref())
-            .map_err(|_| anyhow::anyhow!("unable to construct XChaCha20-Poly1305 key"))?;
         let mut nonce_bytes = [0_u8; NONCE_BYTES];
         dryoc::rng::copy_randombytes(&mut nonce_bytes);
         let nonce = XNonce::from_slice(&nonce_bytes);
-        let encrypted = cipher
+        let encrypted = self
+            .cipher
             .encrypt(
                 nonce,
                 Payload {
@@ -144,11 +154,10 @@ impl DryocPasswordCryptoService {
         if envelope[..KEY_ID_BYTES] != self.key_id {
             bail!("encrypted record references an unavailable key id");
         }
-        let cipher = XChaCha20Poly1305::new_from_slice(self.key.as_ref())
-            .map_err(|_| anyhow::anyhow!("unable to construct XChaCha20-Poly1305 key"))?;
         let nonce = XNonce::from_slice(&envelope[KEY_ID_BYTES..KEY_ID_BYTES + NONCE_BYTES]);
         let ciphertext = &envelope[KEY_ID_BYTES + NONCE_BYTES..];
-        let plaintext_bytes = cipher
+        let plaintext_bytes = self
+            .cipher
             .decrypt(
                 nonce,
                 Payload {
@@ -227,6 +236,28 @@ impl PasswordCryptoService for DryocPasswordCryptoService {
     }
 }
 
+/// Caps how many Argon2id hashes run concurrently. Each `*_MODERATE` hash
+/// transiently allocates ~256 MiB, and *every* login attempt pays this cost —
+/// including the unknown-user dummy path — so without a cap a burst of logins
+/// could pin gigabytes of memory and exhaust the host. Argon2id is CPU- and
+/// memory-bound, so bounding concurrency to the available parallelism keeps peak
+/// memory predictable without sacrificing throughput.
+static HASH_SLOTS: LazyLock<Semaphore> = LazyLock::new(|| {
+    let permits = std::thread::available_parallelism()
+        .map(std::num::NonZeroUsize::get)
+        .unwrap_or(4);
+    Semaphore::new(permits)
+});
+
+/// Acquires one Argon2id execution slot, awaiting if the cap is currently reached.
+/// The returned permit is released when it drops, after the blocking task joins.
+async fn hash_slot() -> SemaphorePermit<'static> {
+    HASH_SLOTS
+        .acquire()
+        .await
+        .expect("the password-hash semaphore is never closed")
+}
+
 /// Verifies a password on the blocking pool, so the Argon2id work never stalls
 /// the async runtime. The plaintext is held in `Zeroizing` and wiped when the
 /// task finishes.
@@ -236,6 +267,7 @@ pub async fn spawn_verify(
     encrypted_record: String,
     password: Zeroizing<String>,
 ) -> anyhow::Result<PasswordVerification> {
+    let _permit = hash_slot().await;
     tokio::task::spawn_blocking(move || {
         service.verify_password(user_id, &encrypted_record, password.as_str())
     })
@@ -249,6 +281,7 @@ pub async fn spawn_encrypt(
     user_id: i32,
     password: Zeroizing<String>,
 ) -> anyhow::Result<String> {
+    let _permit = hash_slot().await;
     tokio::task::spawn_blocking(move || service.encrypt_password(user_id, password.as_str()))
         .await
         .context("password encryption task failed")?
@@ -256,6 +289,7 @@ pub async fn spawn_encrypt(
 
 /// Runs the timing-equalising dummy verification on the blocking pool.
 pub async fn spawn_dummy(service: Arc<dyn PasswordCryptoService>, password: Zeroizing<String>) {
+    let _permit = hash_slot().await;
     let _ = tokio::task::spawn_blocking(move || service.run_dummy_verification(password.as_str()))
         .await;
 }

@@ -84,16 +84,21 @@ same QR code / secret / URI instead of silently discarding the in-progress setup
 
 When an account has two-factor enabled, the login is two steps:
 
-1. `POST /kraken_ui/test_login` — on a correct password the server **does not**
-   grant a role. It rotates the session id, stores a half-authenticated
-   `mfa_pending_user_id` marker, and redirects to the challenge.
+1. `POST /kraken_ui/login` — on a correct password the server **does not** grant
+   a role. It rotates the session id, stores a half-authenticated
+   `mfa_pending_user_id` marker (with a timestamp), and redirects to the
+   challenge. The pending state expires after five minutes, independently of the
+   session idle timeout, so a half-finished login cannot linger.
 2. `GET /kraken_ui/auth/mfa_challenge` — the code form, reachable only while the
-   pending marker is present (otherwise it redirects to the login page).
+   pending marker is present and unexpired (otherwise it redirects to the login
+   page).
 3. `POST /kraken_ui/auth/mfa_verify` — verifies a live TOTP code, or a single-use
-   recovery code (which is burned on use). Only then is the session promoted to
-   fully authenticated (the route guards read `authenticated_operator_type`,
-   which stays unset until this point). Failures are throttled per source IP and
-   account with the same lockout as the password step.
+   recovery code (which is burned on use). A correct TOTP code is bound to its
+   time-step: once a step has authenticated, that code cannot be replayed inside
+   its skew window. Only then is the session promoted to fully authenticated (the
+   route guards read `authenticated_operator_type`, which stays unset until this
+   point). Failures are throttled per source IP and account with the same lockout
+   as the password step.
 
 ## Routes
 
