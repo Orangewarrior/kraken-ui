@@ -27,7 +27,8 @@ in.
 |----------|---------|
 | `KRAKEN_UI_PASSWORD_KEY` / `KRAKEN_UI_PASSWORD_KEY_FILE` | The 32-byte (Base64) key that encrypts password hashes. Required. |
 | `KRAKEN_UI_PASSWORD_KEY_ID` | Key identifier, default `primary-v1`. |
-| `KRAKEN_UI_SESSION_KEY` / `KRAKEN_UI_SESSION_KEY_FILE` | The ≥ 64-byte (Base64) cookie signing key. Strongly recommended in production; an ephemeral key is used if unset. |
+| `KRAKEN_UI_SESSION_KEY` / `KRAKEN_UI_SESSION_KEY_FILE` | The ≥ 64-byte (Base64) cookie signing key. **Required in release builds**: the server refuses to start without it (or the opt-in below). |
+| `KRAKEN_UI_ALLOW_EPHEMERAL_SESSION_KEY` | Allows a generated ephemeral signing key in a release build (development only; debug builds always allow it). Sessions then do not survive a restart. |
 | `KRAKEN_UI_ADMIN_PASSWORD` / `KRAKEN_UI_ADMIN_EMAIL` | Bootstrap the first administrator at start-up. |
 | `KRAKEN_UI_FIRST_TIME_TOKEN` | Optional shared secret required by the `first_time` endpoint, in addition to the loopback check. |
 | `RUST_LOG` | Log level filter. |
@@ -68,11 +69,20 @@ Do not enable payload logging in production.
 
 ## Rate limiting
 
-Two limiters protect the service, both process-local:
+Three controls protect the service, all process-local:
 
 - A login throttle locks a source IP (and IP+account) after repeated failures.
 - A global per-IP request rate limiter (a generous token bucket) caps overall
   request volume as defence in depth and returns `429 Too Many Requests` when
   exceeded.
+- An account-failure monitor raises a single `account_guessing_suspected` audit
+  event when one account accumulates many failures across different IPs. It is
+  detection only and never locks an account.
+
+All three key on the **direct socket peer address**: Kraken UI is designed to
+terminate TLS itself. Behind a reverse proxy every request would carry the
+proxy's address, which collapses the per-IP limiter into one shared bucket and
+records the proxy as the client IP in the audit log. Terminate TLS directly, or
+add a trusted-proxy story before fronting it with a load balancer.
 
 For a multi-replica deployment these should be backed by a shared store.

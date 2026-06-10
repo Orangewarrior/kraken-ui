@@ -96,12 +96,22 @@ async fn initialize_schema(database: &DatabaseConnection) -> anyhow::Result<()> 
                 confirmed INTEGER NOT NULL DEFAULT 0,
                 created_at TIMESTAMP NOT NULL,
                 confirmed_at TIMESTAMP,
+                last_used_step INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (id_user) REFERENCES operators (id_user) ON DELETE CASCADE
             )
             "#,
         ))
         .await
         .context("unable to initialize operator_mfa_totp table")?;
+    // Bring forward databases created before the replay-prevention column existed.
+    // SQLite has no "ADD COLUMN IF NOT EXISTS", so a duplicate-column error on an
+    // already-migrated table is expected and ignored.
+    let _ = database
+        .execute(Statement::from_string(
+            DbBackend::Sqlite,
+            "ALTER TABLE operator_mfa_totp ADD COLUMN last_used_step INTEGER NOT NULL DEFAULT 0",
+        ))
+        .await;
 
     // Single-use recovery codes, sealed at rest like the TOTP secret. Each code is
     // burned (`used` = 1) the first time it authenticates a login.

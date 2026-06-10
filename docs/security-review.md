@@ -146,6 +146,37 @@ A second pass addressed the deeper findings raised after the 0.4.0 review:
 - **Global per-IP request rate limiter** as defence in depth.
 - **Passwords wrapped in `Zeroizing`** on the verification and hashing paths.
 
+## Hardening added in 0.11.0
+
+A further pass after the 0.10.x two-factor work:
+
+- **TOTP replay window closed.** A verified code's time-step is recorded in
+  `operator_mfa_totp.last_used_step`; a code is accepted only when its step is
+  strictly greater, so the same code cannot be reused inside its ±1-step skew
+  window (RFC 6238 §5.2).
+- **Bounded password-hashing concurrency.** Argon2id work runs under a semaphore
+  sized to the available parallelism, so a burst of logins — each `*_MODERATE`
+  hash transiently needs ~256 MiB, including the unknown-user dummy path — can no
+  longer exhaust host memory.
+- **Short two-factor challenge window.** The half-authenticated "password OK,
+  awaiting code" state expires after five minutes, independently of the longer
+  session idle timeout.
+- **Distributed-guessing detection.** `AccountFailureMonitor` emits an audit
+  alert when one account draws failures from many source IPs — visibility the
+  per-IP throttle (kept per-IP on purpose) cannot provide. It never locks.
+- **Session signing key fails closed.** Release builds refuse to start without
+  `KRAKEN_UI_SESSION_KEY` / `_FILE` unless `KRAKEN_UI_ALLOW_EPHEMERAL_SESSION_KEY`
+  is set, matching the password-key behaviour.
+- **`#![forbid(unsafe_code)]`** is now enforced crate-wide.
+- **Docs corrected.** The detail-view payload is HTML-escaped, not Ammonia-
+  stripped; the README and architecture docs were brought in line with the code.
+- **Dead code removed.** The vestigial `black_n_orange_theme` mock-up (which
+  included an `innerHTML`-based script) and a legacy front-end module were
+  deleted.
+- **CI / supply chain.** Least-privilege workflow permissions, `persist-credentials:
+  false` on checkouts, a concurrency guard, Semgrep promoted to a blocking gate,
+  and Dependabot for GitHub Actions and Cargo.
+
 ## Remaining follow-ups
 
 Intentionally out of scope, tracked for later:
@@ -153,6 +184,9 @@ Intentionally out of scope, tracked for later:
 - Back the login throttle and the request rate limiter (and optionally sessions)
   with a shared store for multi-replica deployments; today they are
   process-local.
+- Add an explicit trusted-proxy mode so the per-IP controls and the audited
+  client IP work correctly behind a load balancer; today they require direct TLS
+  termination.
 - Consider TLS 1.3-only and/or mutual TLS for the console. The current rustls
   defaults (TLS 1.2+1.3 with strong cipher suites) are already safe, so this is
   a deployment-policy choice rather than a fix.

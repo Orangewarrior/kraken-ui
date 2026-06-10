@@ -2,6 +2,58 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.11.0 - 2026-06-09
+
+A security and quality hardening pass spanning AppSec, the runtime, Rust quality
+and the CI supply chain.
+
+### Security
+
+- **TOTP codes can no longer be replayed inside their validity window.** Each
+  account records the highest TOTP time-step that has authenticated it
+  (`operator_mfa_totp.last_used_step`); a code is accepted only when its step is
+  strictly greater (RFC 6238 §5.2).
+- **Password hashing is bounded.** Argon2id work runs under a semaphore sized to
+  the available parallelism, so a burst of logins — each `*_MODERATE` hash needs
+  ~256 MiB, including the unknown-user timing-equaliser path — can no longer
+  exhaust host memory.
+- **The two-factor challenge expires after five minutes,** independently of the
+  longer session idle timeout, so a half-finished login cannot linger.
+- **Distributed guessing is surfaced.** A new detection-only monitor emits an
+  `account_guessing_suspected` audit event when one account draws failures from
+  many source IPs. It never locks an account (the IP throttle stays per-IP on
+  purpose).
+- **The session signing key fails closed in release builds:** the server refuses
+  to start without `KRAKEN_UI_SESSION_KEY` / `_FILE` unless
+  `KRAKEN_UI_ALLOW_EPHEMERAL_SESSION_KEY` is set (debug builds still allow it).
+
+### Changed
+
+- `#![forbid(unsafe_code)]` is enforced crate-wide.
+- The login form posts to `POST /kraken_ui/login` (the old `/kraken_ui/test_login`
+  path is gone); `GET /kraken_ui/login` still serves the form.
+- The XChaCha20-Poly1305 cipher is built once and reused, deriving the key
+  schedule a single time instead of on every encrypt/decrypt.
+
+### Removed
+
+- The vestigial `src/view/black_n_orange_theme` mock-up (including an
+  `innerHTML`-based script) and a dead legacy front-end module in `app.js`.
+
+### Documentation
+
+- Corrected the single-attack detail-view description: the `request_payload` is
+  HTML-escaped, not Ammonia-stripped (the README and architecture docs were
+  stale; the code was already correct).
+- Documented the direct-TLS / no-reverse-proxy expectation for the per-IP
+  controls and the audited client IP.
+
+### CI / supply chain
+
+- Least-privilege workflow permissions, `persist-credentials: false` on
+  checkouts, a concurrency guard, Semgrep promoted to a blocking gate, and a new
+  Dependabot config for GitHub Actions and Cargo.
+
 ## 0.10.1 - 2026-06-09
 
 A follow-up release that finishes the MFA enrolment UX and documents the new

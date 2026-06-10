@@ -70,7 +70,13 @@ id, with the signing key loaded from configuration.
 
 - **Rate limiting.** `LoginThrottle` locks a source IP, and an IP+account pair,
   after repeated login failures; `IpRateLimiter` caps overall request volume per
-  IP as a global outer layer. Both are process-local today.
+  IP as a global outer layer; and `AccountFailureMonitor` raises a detection-only
+  audit alert when one account draws failures from many IPs (it never locks, so a
+  victim cannot be locked out from addresses they do not control). All three are
+  process-local today, and all key on the **direct socket peer** — Kraken UI is
+  meant to terminate TLS itself. Behind a reverse proxy every client would share
+  the proxy's IP, collapsing both the per-IP limiter and the audited client IP, so
+  do not deploy it that way without a trusted-proxy story.
 - **Audit logging.** Authentication and operator-administration events are
   emitted on the `audit` tracing target and written to a dedicated `audit.jsonl`
   sink, separate from the application log, and never contain secrets.
@@ -114,8 +120,9 @@ authorised for the read-only detail view for forward compatibility.
 `view_waf_request.htmlx` template (opened in a new tab from the attacks table).
 It looks the row up read-only through `VulnerabilityRepository::find_by_id`,
 maps the severity to a colour class, renders the stored timestamp in a
-human-readable form, and sanitises the attacker-controlled `request_payload`
-with Ammonia before it reaches the template (which emits it without further
-escaping). Syntax highlighting is applied in `view/static/app.js` by building
+human-readable form, and renders the attacker-controlled `request_payload`
+through Askama's default HTML escaping — it is **not** Ammonia-stripped, so the
+exact attacker bytes survive as inert text instead of being silently altered.
+Syntax highlighting is applied in `view/static/app.js` by building
 DOM nodes only — never `innerHTML` — so it remains compatible with the strict
 CSP and Trusted Types.

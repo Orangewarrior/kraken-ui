@@ -8,6 +8,7 @@ use axum::{
 };
 use axum_csrf::CsrfToken;
 use serde::Deserialize;
+use time::OffsetDateTime;
 use tower_sessions::Session;
 use tracing::{info, warn};
 use zeroize::Zeroizing;
@@ -33,6 +34,11 @@ const AUTHENTICATED_OPERATOR_TYPE: &str = "authenticated_operator_type";
 // factor. It grants nothing on its own: the route guards only ever read
 // `AUTHENTICATED_OPERATOR_TYPE`, which stays unset until the code is verified.
 const MFA_PENDING_USER_ID: &str = "mfa_pending_user_id";
+// Timestamp (unix seconds) stored next to the pending marker so the second factor
+// must be supplied promptly. This window is deliberately short and independent of
+// the session's idle expiry, which may be hours.
+const MFA_PENDING_AT: &str = "mfa_pending_at";
+const MFA_PENDING_TTL_SECONDS: i64 = 5 * 60;
 
 #[derive(Deserialize)]
 pub struct LoginForm {
@@ -98,7 +104,7 @@ pub async fn login_submit(
         || password.len() > 256
         || sanitize::secret_has_rejected_markup(&password)
     {
-        register_login_failure(&state, &ip_key, &ip_user_key);
+        register_login_failure(&state, &ip_key, &ip_user_key, &username, &client_ip);
         audit_login(&client_ip, &username, "invalid_input");
         return invalid_login_response(token).await;
     }
@@ -107,7 +113,7 @@ pub async fn login_submit(
         // Spend the same time as a real verification so unknown usernames are
         // not distinguishable by response latency.
         spawn_dummy(state.password_crypto.clone(), password).await;
-        register_login_failure(&state, &ip_key, &ip_user_key);
+        register_login_failure(&state, &ip_key, &ip_user_key, &username, &client_ip);
         audit_login(&client_ip, &username, "unknown_user");
         return invalid_login_response(token).await;
     };
@@ -126,13 +132,13 @@ pub async fn login_submit(
                 error = %error,
                 "password crypto service rejected the stored record"
             );
-            register_login_failure(&state, &ip_key, &ip_user_key);
+            register_login_failure(&state, &ip_key, &ip_user_key, &username, &client_ip);
             audit_login(&client_ip, &username, "crypto_error");
             return invalid_login_response(token).await;
         }
     };
     if !verification.valid {
-        register_login_failure(&state, &ip_key, &ip_user_key);
+        register_login_failure(&state, &ip_key, &ip_user_key, &username, &client_ip);
         audit_login(&client_ip, &username, "bad_password");
         return invalid_login_response(token).await;
     }
@@ -167,6 +173,14 @@ pub async fn login_submit(
             .map_err(|error| {
                 AppError::internal(anyhow!(
                     "failed to persist pending two-factor state: {error}"
+                ))
+            })?;
+        session
+            .insert(MFA_PENDING_AT, OffsetDateTime::now_utc().unix_timestamp())
+            .await
+            .map_err(|error| {
+                AppError::internal(anyhow!(
+                    "failed to persist pending two-factor timestamp: {error}"
                 ))
             })?;
         audit_login(&client_ip, &username, "password_ok_mfa_required");
@@ -235,12 +249,7 @@ pub async fn mfa_verify(
     }
 
     state.login_throttle.record_success(&throttle_key);
-    session
-        .remove::<i32>(MFA_PENDING_USER_ID)
-        .await
-        .map_err(|error| {
-            AppError::internal(anyhow!("failed to clear pending two-factor state: {error}"))
-        })?;
+    clear_mfa_pending(&session).await?;
     establish_session(&session, &operator).await?;
     audit_login(&client_ip, &operator.username, "success");
     Ok(Redirect::to("/kraken_ui/auth/admin_panel").into_response())
@@ -280,12 +289,51 @@ async fn establish_session(
 }
 
 async fn mfa_pending_user_id(session: &Session) -> Result<Option<i32>, AppError> {
-    session
+    let Some(id_user) = session
         .get::<i32>(MFA_PENDING_USER_ID)
         .await
         .map_err(|error| {
             AppError::internal(anyhow!("failed to read pending two-factor state: {error}"))
-        })
+        })?
+    else {
+        return Ok(None);
+    };
+    let started_at = session
+        .get::<i64>(MFA_PENDING_AT)
+        .await
+        .map_err(|error| {
+            AppError::internal(anyhow!(
+                "failed to read pending two-factor timestamp: {error}"
+            ))
+        })?
+        .unwrap_or(0);
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    // Expire a half-finished login left sitting on the challenge, independently of
+    // the (much longer) session idle timeout.
+    if started_at == 0 || now.saturating_sub(started_at) > MFA_PENDING_TTL_SECONDS {
+        clear_mfa_pending(session).await?;
+        return Ok(None);
+    }
+    Ok(Some(id_user))
+}
+
+/// Removes the pending two-factor markers (id and timestamp) from the session.
+async fn clear_mfa_pending(session: &Session) -> Result<(), AppError> {
+    session
+        .remove::<i32>(MFA_PENDING_USER_ID)
+        .await
+        .map_err(|error| {
+            AppError::internal(anyhow!("failed to clear pending two-factor state: {error}"))
+        })?;
+    session
+        .remove::<i64>(MFA_PENDING_AT)
+        .await
+        .map_err(|error| {
+            AppError::internal(anyhow!(
+                "failed to clear pending two-factor timestamp: {error}"
+            ))
+        })?;
+    Ok(())
 }
 
 pub async fn logout(
@@ -335,9 +383,26 @@ pub async fn authenticated_username(session: &Session) -> Option<String> {
     session.get::<String>(AUTHENTICATED_USERNAME).await.ok()?
 }
 
-fn register_login_failure(state: &AppState, ip_key: &str, ip_user_key: &str) {
+fn register_login_failure(
+    state: &AppState,
+    ip_key: &str,
+    ip_user_key: &str,
+    username: &str,
+    client_ip: &str,
+) {
     state.login_throttle.record_failure(ip_key);
     state.login_throttle.record_failure(ip_user_key);
+    // Detection only: surface a single account drawing failures from many sources,
+    // which per-IP throttling (deliberately) cannot see. This never locks anything.
+    if !username.is_empty() && state.account_failure_monitor.note_failure(username) {
+        warn!(
+            target: "audit",
+            event = "account_guessing_suspected",
+            username = %username,
+            client_ip = %client_ip,
+            "elevated authentication failures for a single account across sources"
+        );
+    }
 }
 
 fn audit_login(client_ip: &str, username: &str, outcome: &str) {

@@ -60,8 +60,7 @@ pub async fn mfa_overview(
             &operator,
             enrollment.secret_base32,
             enrollment.otpauth_uri,
-            "Finish confirming the current authenticator code to enable two-factor."
-                .to_owned(),
+            "Finish confirming the current authenticator code to enable two-factor.".to_owned(),
             "",
         );
     }
@@ -346,7 +345,8 @@ fn render_recovery(
     message: String,
 ) -> Result<Response, AppError> {
     let recovery_codes_download_url = recovery_codes_download_data_url(&recovery_codes);
-    let recovery_codes_download_name = format!("krakenwaf-recovery-codes-{}.txt", operator.username);
+    let recovery_codes_download_name =
+        format!("krakenwaf-recovery-codes-{}.txt", operator.username);
     render_with_csrf(token, |csrf_token| MfaTemplate {
         active_page: nav::USER_STATUS,
         csrf_token,
@@ -444,10 +444,8 @@ mod tests {
 
     #[test]
     fn encodes_recovery_codes_as_a_downloadable_text_file() {
-        let data_url = recovery_codes_download_data_url(&[
-            "ABCD-EFGH".to_owned(),
-            "JKLM-NPQR".to_owned(),
-        ]);
+        let data_url =
+            recovery_codes_download_data_url(&["ABCD-EFGH".to_owned(), "JKLM-NPQR".to_owned()]);
 
         assert!(data_url.starts_with("data:text/plain;charset=utf-8;base64,"));
 

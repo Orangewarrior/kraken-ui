@@ -32,7 +32,7 @@
       <p class="auth-error" role="alert">{{ error_message }}</p>
       {% endif %}
 
-      <form class="login-form" method="post" action="/kraken_ui/test_login" autocomplete="on">
+      <form class="login-form" method="post" action="/kraken_ui/login" autocomplete="on">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
         <div class="field-group">

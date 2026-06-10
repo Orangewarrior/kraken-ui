@@ -9,7 +9,7 @@ use crate::{
     models::session_store::SeaOrmSessionStore,
     security::{
         password::PasswordPolicy,
-        rate_limit::{IpRateLimiter, LoginThrottle},
+        rate_limit::{AccountFailureMonitor, IpRateLimiter, LoginThrottle},
     },
     services::password_crypto::PasswordCryptoService,
     services::waf_metrics::WafMetricsService,
@@ -27,5 +27,7 @@ pub struct AppState {
     pub session_store: SeaOrmSessionStore,
     pub login_throttle: Arc<LoginThrottle>,
     pub request_rate_limiter: Arc<IpRateLimiter>,
+    /// Detection-only counter for distributed guessing against a single account.
+    pub account_failure_monitor: Arc<AccountFailureMonitor>,
     pub first_time_lock: Arc<Mutex<()>>,
 }

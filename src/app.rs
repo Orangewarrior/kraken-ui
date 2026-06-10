@@ -26,7 +26,7 @@ use crate::{
     security::{
         headers,
         password::{MediumOrStrongPasswordPolicy, PasswordPolicy},
-        rate_limit::{IpRateLimiter, LoginThrottle},
+        rate_limit::{AccountFailureMonitor, IpRateLimiter, LoginThrottle},
         sanitize,
     },
     services::{
@@ -110,6 +110,7 @@ impl AppFactory {
             session_store: session_store.clone(),
             login_throttle: Arc::new(LoginThrottle::with_defaults()),
             request_rate_limiter: Arc::new(IpRateLimiter::with_defaults()),
+            account_failure_monitor: Arc::new(AccountFailureMonitor::with_defaults()),
             first_time_lock: Arc::new(tokio::sync::Mutex::new(())),
         };
 
@@ -174,12 +175,25 @@ fn load_session_signing_key() -> anyhow::Result<Key> {
             Ok(Key::from(&bytes))
         }
         None => {
-            warn!(
-                "no session signing key configured; generating an ephemeral one. Sessions will not \
-                 survive a restart or work across replicas. Set KRAKEN_UI_SESSION_KEY or \
-                 KRAKEN_UI_SESSION_KEY_FILE in production."
-            );
-            Ok(Key::generate())
+            // Fail closed in release builds: a missing signing key in production
+            // silently breaks session continuity and cross-replica validation, the
+            // opposite of this project's "refuse to boot when misconfigured" stance.
+            // Debug builds (or an explicit opt-in) keep the convenient ephemeral key
+            // for local development.
+            if cfg!(debug_assertions) || env::var("KRAKEN_UI_ALLOW_EPHEMERAL_SESSION_KEY").is_ok() {
+                warn!(
+                    "no session signing key configured; generating an ephemeral one. Sessions will \
+                     not survive a restart or work across replicas. Set KRAKEN_UI_SESSION_KEY or \
+                     KRAKEN_UI_SESSION_KEY_FILE in production."
+                );
+                Ok(Key::generate())
+            } else {
+                bail!(
+                    "no session signing key configured: set KRAKEN_UI_SESSION_KEY or \
+                     KRAKEN_UI_SESSION_KEY_FILE (Base64, at least 64 bytes). To allow an ephemeral \
+                     development key in a release build, set KRAKEN_UI_ALLOW_EPHEMERAL_SESSION_KEY=1."
+                )
+            }
         }
     }
 }

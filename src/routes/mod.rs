@@ -80,8 +80,10 @@ pub fn create(state: AppState) -> Router {
             "/dashboard",
             get(|| async { Redirect::to("/kraken_ui/auth/admin_panel") }),
         )
-        .route("/kraken_ui/login", get(auth::login_page))
-        .route("/kraken_ui/test_login", post(auth::login_submit))
+        .route(
+            "/kraken_ui/login",
+            get(auth::login_page).post(auth::login_submit),
+        )
         // The two-factor challenge sits between a correct password and a full
         // session; it authorises itself from the pending marker on the session.
         .route(
