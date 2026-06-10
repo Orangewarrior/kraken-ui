@@ -265,11 +265,19 @@ stripped, and logs are bounded.
   centralised async crypto helpers, a shared protected-file reader, navigation
   constants, and RFC 3339 timestamps via the `time` crate.
 - Removed the unused `OperatorRepository::delete_by_email`.
+- Made the supplementary Semgrep CI job best-effort so a transient Docker Hub
+  image-pull failure cannot block a merge; CodeQL remains the blocking SAST gate.
 
 ### Fixed
 
 - Corrected the declared licence to **MIT** (in `Cargo.toml`, the README and the
   docs) to match the `LICENSE` file, which has always been MIT.
+
+### Removed
+
+- Deleted the stale, unused `conf/setup.conf`, which the application never loaded
+  (only `conf/setup.yaml` is read) and which leaked a developer's local path and
+  username.
 
 ### Documentation
 
