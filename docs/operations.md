@@ -31,6 +31,7 @@ in.
 | `KRAKEN_UI_ALLOW_EPHEMERAL_SESSION_KEY` | Allows a generated ephemeral signing key in a release build (development only; debug builds always allow it). Sessions then do not survive a restart. |
 | `KRAKEN_UI_ADMIN_PASSWORD` / `KRAKEN_UI_ADMIN_EMAIL` | Bootstrap the first administrator at start-up. |
 | `KRAKEN_UI_FIRST_TIME_TOKEN` | Optional shared secret required by the `first_time` endpoint, in addition to the loopback check. |
+| `KRAKEN_UI_SOURCE_DIR` | Source checkout updated by the admin-only updater. Defaults to the process working directory. |
 | `BEARER_PASSWORD_FILE` / `BEARER_PASSWORD` | KrakenWAF observability bearer token. Uses the same names and resolution order as KrakenWAF. |
 | `RUST_LOG` | Log level filter. |
 
@@ -78,6 +79,15 @@ development commands and `401`/`403` diagnosis, is in
 The default path is `db/kraken-ui.sqlite`. The `operators` table is created
 automatically on first start. See [database.md](database.md) for the schema and
 the full route list.
+
+## Source updater
+
+Version `0.13.0` adds an administrator-only update page. It requires outbound
+GitHub HTTPS access, `cargo`, a writable source checkout and permission to
+replace the running executable. Existing databases, `conf/`, certificates,
+logs, YAML files and `.conf` files are preserved. See
+[source-updates.md](source-updates.md) for the complete trust model, update
+sequence and recovery procedure.
 
 ## Security headers
 

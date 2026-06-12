@@ -2,7 +2,7 @@
 
 > The secure-by-default admin console for [KrakenWAF](https://github.com/Orangewarrior/KrakenWaf) — built in Rust.
 
-**Current version: 0.12.0**
+**Current version: 0.13.0**
 
 Kraken UI is a small, hardened web application for operating a KrakenWAF
 deployment: manage operators, watch blocked attacks in real time, and read live
@@ -27,6 +27,9 @@ inline JavaScript.
   to a dedicated `audit.jsonl`, and the WAF metrics channel is pinned to the
   certificate you configure and authenticated with KrakenWAF's shared bearer
   token.
+- **Admin-controlled stable updates.** Administrators can download, validate,
+  compile and install the latest published Kraken UI release from the Updates
+  menu. Runtime databases and local configuration remain untouched.
 - **No surprises in your dependency tree.** Every transitive licence exception
   is pinned in `deny.toml`, and CI runs Clippy, Semgrep, CodeQL, cargo-audit,
   cargo-deny and OSV Scanner on every push.
@@ -136,6 +139,7 @@ Then sign in at `https://host:port/kraken_ui/login`.
 | Operators   | `/kraken_ui/auth/insert_user`, `/delete_user`, `/edit_user`, `/show_user_table` |
 | Monitoring  | `/kraken_ui/auth/show_attacks`, `/kraken_ui/auth/view_waf_request/?id=<id>` |
 | Account     | `/kraken_ui/auth/update_password`, `/kraken_ui/auth/mfa` |
+| Updates     | `/kraken_ui/auth/update_kraken_ui` (administrators only) |
 | Two-factor  | `/kraken_ui/auth/mfa_challenge`, `/kraken_ui/auth/mfa_verify` (sign-in challenge) |
 
 ### Roles
@@ -206,6 +210,8 @@ For the bigger picture, see the [`docs/`](docs/) directory:
 - [Architecture](docs/architecture.md) — how the pieces fit together.
 - [WAF bearer authentication](docs/waf-bearer-auth.md) — shared token loading,
   port `4343`, systemd and troubleshooting.
+- [Source updates](docs/source-updates.md) — admin-only stable release updates,
+  preserved files, build requirements and recovery.
 - [Security](docs/security.md) — the controls and why they exist.
 - [Security review](docs/security-review.md) — standing findings and their status.
 - [Database & ACL](docs/database.md) — schema, sessions and routes.

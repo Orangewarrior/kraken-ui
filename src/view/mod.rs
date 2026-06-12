@@ -13,6 +13,7 @@ pub mod nav {
     pub const DASHBOARD: &str = "dashboard";
     pub const ACL: &str = "acl";
     pub const MONITOR: &str = "monitor";
+    pub const UPDATES: &str = "updates";
     pub const USER_STATUS: &str = "user_status";
 }
 
@@ -84,6 +85,15 @@ pub struct ShowUserTableTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
     pub show_acl: bool,
+}
+
+#[derive(Template)]
+#[template(path = "update_kraken_ui.htmlx", escape = "html")]
+pub struct UpdateKrakenUiTemplate {
+    pub active_page: &'static str,
+    pub csrf_token: String,
+    pub show_acl: bool,
+    pub current_version: &'static str,
 }
 
 #[derive(Template)]
@@ -183,7 +193,7 @@ pub fn csrf_error_response() -> Response {
 mod tests {
     use askama::Template;
 
-    use super::ViewWafRequestTemplate;
+    use super::{DashboardTemplate, ViewWafRequestTemplate};
 
     #[test]
     fn escapes_attacker_controlled_request_payload() {
@@ -213,5 +223,26 @@ mod tests {
         // original characters inside `textContent`.
         assert!(html.contains("&#60;script&#62;alert(document.cookie)&#60;/script&#62;"));
         assert!(!html.contains("<script>alert(document.cookie)</script>"));
+    }
+
+    #[test]
+    fn updates_menu_is_visible_only_for_administrators() {
+        let admin = DashboardTemplate {
+            active_page: "dashboard",
+            csrf_token: "csrf".to_owned(),
+            show_acl: true,
+        }
+        .render()
+        .expect("admin dashboard");
+        let operator = DashboardTemplate {
+            active_page: "dashboard",
+            csrf_token: "csrf".to_owned(),
+            show_acl: false,
+        }
+        .render()
+        .expect("operator dashboard");
+
+        assert!(admin.contains("Update Kraken UI"));
+        assert!(!operator.contains("Update Kraken UI"));
     }
 }

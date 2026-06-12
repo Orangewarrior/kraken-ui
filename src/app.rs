@@ -1,8 +1,9 @@
-use std::{env, fs, path::Path, sync::Arc};
+use std::{env, fs, net::SocketAddr, path::Path, sync::Arc};
 
 use anyhow::{Context, bail};
 use axum::{Router, middleware};
 use axum_csrf::{CsrfConfig, CsrfLayer, SameSite};
+use axum_server::Handle;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use time::Duration;
 use tower_http::trace::TraceLayer;
@@ -31,6 +32,7 @@ use crate::{
     },
     services::{
         password_crypto::{DryocPasswordCryptoService, PasswordCryptoService},
+        source_update::SourceUpdateService,
         waf_metrics::WafMetricsService,
     },
     state::AppState,
@@ -40,6 +42,7 @@ pub struct AppFactory {
     config: AppConfig,
     password_crypto: Option<Arc<dyn PasswordCryptoService>>,
     waf_metrics: Option<WafMetricsService>,
+    server_handle: Option<Handle<SocketAddr>>,
 }
 
 impl AppFactory {
@@ -48,6 +51,7 @@ impl AppFactory {
             config,
             password_crypto: None,
             waf_metrics: None,
+            server_handle: None,
         }
     }
 
@@ -58,6 +62,11 @@ impl AppFactory {
 
     pub fn with_waf_metrics(mut self, waf_metrics: WafMetricsService) -> Self {
         self.waf_metrics = Some(waf_metrics);
+        self
+    }
+
+    pub fn with_server_handle(mut self, server_handle: Handle<SocketAddr>) -> Self {
+        self.server_handle = Some(server_handle);
         self
     }
 
@@ -111,6 +120,7 @@ impl AppFactory {
         };
         let security_headers = headers::load("conf/headers_sec.txt").await?;
         let session_store = SeaOrmSessionStore::new(database.clone()).await?;
+        let source_update = Arc::new(SourceUpdateService::new(self.server_handle)?);
         let state = AppState {
             config: Arc::new(self.config.clone()),
             database,
@@ -124,6 +134,7 @@ impl AppFactory {
             request_rate_limiter: Arc::new(IpRateLimiter::with_defaults()),
             account_failure_monitor: Arc::new(AccountFailureMonitor::with_defaults()),
             first_time_lock: Arc::new(tokio::sync::Mutex::new(())),
+            source_update,
         };
 
         let session_minutes = i64::try_from(self.config.session_timeout_minutes)

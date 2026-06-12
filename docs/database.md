@@ -117,6 +117,9 @@ pages themselves are identical.
 |--------|------|---------|
 | GET  | `/admin_panel`, `/dashboard` | Dashboard view |
 | GET  | `/api/dashboard` | Dashboard JSON metrics |
+| GET  | `/update_kraken_ui` | Admin-only stable source update page |
+| POST | `/update_kraken_ui/start` | Start an admin-only source update |
+| GET  | `/api/update_kraken_ui` | Read admin-only update status |
 | GET  | `/show_attacks` | Observed-attacks table |
 | GET  | `/api/attacks` | Attacks JSON (paginated) |
 | GET  | `/update_password` | Change-password form |

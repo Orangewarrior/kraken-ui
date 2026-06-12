@@ -5,4 +5,5 @@ pub mod health;
 pub mod mfa;
 pub mod pagination;
 pub mod setup;
+pub mod update;
 pub mod waf;

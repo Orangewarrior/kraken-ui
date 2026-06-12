@@ -28,6 +28,14 @@
         <a href="/kraken_ui/auth/edit_user">Find user</a>
       </div>
     </div>
+    <div class="nav-section">
+      <button class="nav-trigger{% if active_page == "updates" %} active{% endif %}" type="button" data-accordion aria-expanded="true" aria-controls="updates-menu">
+        <span class="nav-icon" aria-hidden="true">^</span><strong>Updates</strong><span class="chevron" aria-hidden="true">v</span>
+      </button>
+      <div class="submenu" id="updates-menu">
+        <a href="/kraken_ui/auth/update_kraken_ui">Update Kraken UI</a>
+      </div>
+    </div>
     {% endif %}
     <div class="nav-section">
       <button class="nav-trigger{% if active_page == "monitor" %} active{% endif %}" type="button" data-accordion aria-expanded="true" aria-controls="monitor-menu">

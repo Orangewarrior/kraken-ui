@@ -26,8 +26,80 @@
     });
   };
 
+  const setupSourceUpdate = () => {
+    const panel = qs("[data-update-panel]");
+    if (!panel) return;
+    const form = qs("[data-update-form]", panel);
+    const consoleBox = qs("[data-update-console]", panel);
+    const submit = qs("[data-update-submit]", panel);
+    const standby = qs("[data-update-standby]", panel);
+    const countdown = qs("[data-update-countdown]", panel);
+    let redirectStarted = false;
+    let secondsRemaining = 120;
+
+    const render = (status) => {
+      if (consoleBox && typeof status.log === "string") {
+        consoleBox.value = status.log;
+        consoleBox.scrollTop = consoleBox.scrollHeight;
+      }
+      if (submit) submit.disabled = Boolean(status.in_progress);
+      if (status.phase === "restarting" && !redirectStarted) {
+        redirectStarted = true;
+        secondsRemaining = Number(status.redirect_after_seconds) || 120;
+        if (standby) standby.hidden = false;
+        if (countdown) countdown.textContent = String(secondsRemaining);
+        window.setInterval(() => {
+          secondsRemaining = Math.max(0, secondsRemaining - 1);
+          if (countdown) countdown.textContent = String(secondsRemaining);
+        }, 1000);
+        window.setTimeout(() => {
+          window.location.assign("/kraken_ui/login");
+        }, secondsRemaining * 1000);
+      }
+    };
+
+    const poll = async () => {
+      try {
+        const response = await fetch("/kraken_ui/auth/api/update_kraken_ui", {
+          credentials: "same-origin",
+          cache: "no-store"
+        });
+        if (response.ok) render(await response.json());
+      } catch (_error) {
+        if (redirectStarted && consoleBox && !consoleBox.value.includes("Waiting for the updated web UI")) {
+          consoleBox.value += "\nWaiting for the updated web UI to accept connections...\n";
+        }
+      }
+    };
+
+    if (form) {
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (submit) submit.disabled = true;
+        if (consoleBox) consoleBox.value = "Starting update request...\n";
+        try {
+          const response = await fetch(form.action, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams(new FormData(form))
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          render(await response.json());
+        } catch (error) {
+          if (consoleBox) consoleBox.value += `Unable to start update: ${error.message}\n`;
+          if (submit) submit.disabled = false;
+        }
+      });
+    }
+
+    poll();
+    window.setInterval(poll, 1000);
+  };
+
   document.addEventListener("DOMContentLoaded", () => {
     setupNav();
+    setupSourceUpdate();
   });
 })();
 

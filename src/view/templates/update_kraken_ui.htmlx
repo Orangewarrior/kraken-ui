@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>KrakenWAF - Update Kraken UI</title><link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script></head>
+<body data-page="update-kraken-ui"><div class="shell admin-shell">{% include "admin_sidebar.html" %}<main class="page admin-content">
+  <section class="page-hero compact-hero"><span class="badge">Updates</span><h1>Update Kraken UI</h1><p class="lead">Install the latest stable source release from the official Kraken UI repository.</p></section>
+  <section class="panel form-panel update-panel" data-update-panel>
+    <div class="update-version"><span>Running version</span><strong>{{ current_version }}</strong></div>
+    <label for="update-console">Update console</label>
+    <textarea id="update-console" class="update-console" rows="18" readonly spellcheck="false" data-update-console>Ready to check the latest stable Kraken UI release.</textarea>
+    <p class="update-standby" data-update-standby hidden>Restart in progress. This page will redirect to login in <strong data-update-countdown>120</strong> seconds.</p>
+    <form method="post" action="/kraken_ui/auth/update_kraken_ui/start" data-update-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="cta" type="submit" data-update-submit>Update to last stable version</button>
+    </form>
+    <p class="lead update-warning">Databases, certificates, logs, the <code>conf/</code> directory and existing <code>.yaml</code>, <code>.yml</code> and <code>.conf</code> files are preserved.</p>
+  </section>
+</main></div></body></html>

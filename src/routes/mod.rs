@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use tower_http::services::ServeDir;
 
 use crate::{
-    controllers::{acl, auth, dashboard, health, mfa, setup, waf},
+    controllers::{acl, auth, dashboard, health, mfa, setup, update, waf},
     middleware::authentication::{require_admin, require_attack_viewer, require_operator},
     state::AppState,
 };
@@ -37,6 +37,12 @@ pub fn create(state: AppState) -> Router {
         )
         .route("/kraken_ui/auth/show_user_table", get(acl::show_user_table))
         .route("/kraken_ui/auth/api/operators", get(acl::api_operators))
+        .route("/kraken_ui/auth/update_kraken_ui", get(update::page))
+        .route(
+            "/kraken_ui/auth/update_kraken_ui/start",
+            post(update::start),
+        )
+        .route("/kraken_ui/auth/api/update_kraken_ui", get(update::status))
         .route_layer(middleware::from_fn(require_admin));
 
     // Day-to-day console routes shared by administrators and operators. The

@@ -68,6 +68,14 @@ records in SQLite, so they survive a restart and can be revoked by deleting a
 row; expired rows are pruned opportunistically. The cookie only carries a signed
 id, with the signing key loaded from configuration.
 
+**Source updates are staged before activation.** The admin-only update service
+queries GitHub releases with `reqwest`, validates a stable semantic tag, rejects
+unsafe archive entries and compiles with the locked dependency graph in a
+temporary directory. Source and executable activation happen only after the
+staged build succeeds. Persistent paths and existing configuration files are
+excluded from the source overlay, and a server handle coordinates the
+replacement process with listener shutdown.
+
 ## Cross-cutting concerns
 
 - **Rate limiting.** `LoginThrottle` locks a source IP, and an IP+account pair,

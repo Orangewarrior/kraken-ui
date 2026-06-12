@@ -12,6 +12,7 @@ use crate::{
         rate_limit::{AccountFailureMonitor, IpRateLimiter, LoginThrottle},
     },
     services::password_crypto::PasswordCryptoService,
+    services::source_update::SourceUpdateService,
     services::waf_metrics::WafMetricsService,
 };
 
@@ -30,4 +31,5 @@ pub struct AppState {
     /// Detection-only counter for distributed guessing against a single account.
     pub account_failure_monitor: Arc<AccountFailureMonitor>,
     pub first_time_lock: Arc<Mutex<()>>,
+    pub source_update: Arc<SourceUpdateService>,
 }

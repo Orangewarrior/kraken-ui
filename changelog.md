@@ -2,6 +2,39 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.13.0 - 2026-06-12
+
+### Added
+
+- Add an administrator-only **Updates → Update Kraken UI** navigation section
+  and update page with running-version details, a live console and a stable
+  release action.
+- Query the official GitHub latest-release API with `reqwest`, download the
+  validated release archive, compile it in staging with
+  `cargo build --release --locked`, install it and restart the TLS listener.
+- Poll update status in the browser and show a 120-second restart standby before
+  redirecting to login.
+- Retain the previous executable beside the active binary for manual recovery.
+
+### Security
+
+- Protect the page, update action and status API with `require_admin`; operators
+  and auditors neither see nor reach the feature.
+- Require stable `vMAJOR.MINOR.PATCH` release tags and refuse downgrades,
+  prereleases and drafts.
+- Reject archive traversal, symbolic links, special files and oversized
+  downloads/extractions.
+- Preserve databases, sessions, certificates, logs, `conf/` and all existing
+  YAML, `.conf` and SQLite files.
+- Bound update console output to 64 KiB and audit every accepted update start.
+
+### Documentation
+
+- Add `docs/source-updates.md` with runtime requirements, trust boundaries,
+  preservation rules, restart behavior and recovery instructions.
+- Document the new routes, environment variable and architecture in the README
+  and operations/database/architecture guides.
+
 ## 0.12.0 - 2026-06-12
 
 Kraken UI now supports the authenticated observability channel introduced by
