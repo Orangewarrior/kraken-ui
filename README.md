@@ -2,7 +2,7 @@
 
 > The secure-by-default admin console for [KrakenWAF](https://github.com/Orangewarrior/KrakenWaf) — built in Rust.
 
-**Current version: 0.13.0**
+**Current version: 0.14.0**
 
 Kraken UI is a small, hardened web application for operating a KrakenWAF
 deployment: manage operators, watch blocked attacks in real time, and read live
@@ -14,8 +14,8 @@ inline JavaScript.
 - **Secure by default.** TLS is mandatory, sessions and CSRF cookies use the
   `__Host-` prefix, and a strict Content-Security-Policy forbids inline
   scripts and styles. Logins are rate-limited and timing-equalised, sessions are
-  persisted and revocable, and a global per-IP request limiter guards every
-  route.
+  persisted and revocable, and GCRA request limits with SQLite or Redis guard
+  every route.
 - **Defence in depth on passwords.** Argon2id hashing (libsodium-compatible)
   wrapped in an XChaCha20-Poly1305 envelope with a per-user AAD, so a hash can
   never be replayed against another account; plaintext is held in `Zeroizing`.
@@ -50,8 +50,8 @@ end to end.
 
 ## Quick start
 
-You will need a recent **stable Rust toolchain** (edition 2024) and OpenSSL for
-generating keys.
+You will need **Rust 1.95 or newer** (edition 2024) and OpenSSL for generating
+keys. `rust-toolchain.toml` pins the tested compiler.
 
 **1. Configure `conf/setup.yaml`** with your certificate, private key, TLS
 address, the UI's own database and the KrakenWAF alerts database:
@@ -68,7 +68,14 @@ log-dir: log
 session-timeout-minutes: 30
 ```
 
-**2. Provide a 32-byte XChaCha20-Poly1305 key** as Base64. For local
+**2. Review `conf/ratelimit.yaml`.** The defaults enable local
+`axum-governor` GCRA plus persistent SQLite state at
+`db/kraken-ui-ratelimit.sqlite`. The same file controls the sustained rate,
+burst, per-IP concurrency, TLS handshake timeout and accepted request timeout.
+Redis can coordinate multiple replicas and requires TLS plus file-first ACL
+credentials. See [Rate limiting](docs/rate-limiting.md).
+
+**3. Provide a 32-byte XChaCha20-Poly1305 key** as Base64. For local
 development an environment variable is fine:
 
 ```bash
@@ -76,7 +83,7 @@ export KRAKEN_UI_PASSWORD_KEY="$(openssl rand -base64 32)"
 export KRAKEN_UI_PASSWORD_KEY_ID='primary-v1'
 ```
 
-**3. Provide the KrakenWAF observability bearer token.** KrakenWAF's dedicated
+**4. Provide the KrakenWAF observability bearer token.** KrakenWAF's dedicated
 listener on port `4343` and Kraken UI must resolve the same value:
 
 ```bash
@@ -105,7 +112,7 @@ sessions survive restarts and validate across replicas:
 export KRAKEN_UI_SESSION_KEY="$(openssl rand -base64 64)"
 ```
 
-**4. Create the first administrator** and run the app:
+**5. Create the first administrator** and run the app:
 
 ```bash
 export KRAKEN_UI_ADMIN_PASSWORD='Use-A-Unique!Strong9Password'

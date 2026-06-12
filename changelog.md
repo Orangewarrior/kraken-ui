@@ -2,6 +2,43 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.14.0 - 2026-06-12
+
+### Added
+
+- Replace the process-local token bucket with `axum-governor` and governor's
+  GCRA algorithm, keyed by the direct TCP peer IP.
+- Add persistent GCRA state through SQLite by default and an optional shared
+  Redis backend for multi-replica deployments.
+- Add active per-IP concurrency, TLS handshake and accepted-request timeouts,
+  all configured in `conf/ratelimit.yaml`.
+- Add a real HTTP integration test that sends repeated requests with `reqwest`
+  and verifies SQLite-backed burst rejection.
+
+### Security
+
+- Require verified TLS and ACL credentials for Redis; plaintext Redis
+  connections are rejected at startup.
+- Resolve `REDIS_USERNAME` and `REDIS_PASSWORD` through `_FILE`,
+  `/run/secrets/krakenwaf/` and environment sources without storing secrets in
+  YAML or connection URLs.
+- Use bounded Redis connection/response timeouts, bounded retries, a validated
+  key prefix and fail-closed behavior by default.
+- Configure SQLite WAL, immediate transactions, busy timeout and
+  `trusted_schema=OFF` for durable, atomic GCRA decisions.
+
+### Changed
+
+- Add `conf/ratelimit.yaml` as the authoritative runtime configuration for
+  request rate, burst, concurrency and connection-related timeouts.
+- Require Rust 1.95 and bump the package version from `0.13.0` to `0.14.0`.
+
+### Documentation
+
+- Add `docs/rate-limiting.md` with SQLite operations, Redis systemd credentials,
+  CIS-aligned server hardening guidance and failure semantics.
+- Update the README quick start and security overview.
+
 ## 0.13.0 - 2026-06-12
 
 ### Added

@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use anyhow::Context;
-use axum_server::tls_rustls::RustlsConfig;
-use kraken_ui::{AppFactory, config::AppConfig};
+use axum_server::tls_rustls::{RustlsAcceptor, RustlsConfig};
+use kraken_ui::{AppFactory, config::AppConfig, services::rate_limit::RateLimitConfig};
 use std::{net::SocketAddr, time::Duration};
 use tracing::info;
 
@@ -20,6 +20,9 @@ async fn main() -> anyhow::Result<()> {
     let config = AppConfig::load("conf/setup.yaml")
         .await
         .context("failed to load conf/setup.yaml")?;
+    let rate_limit_config = RateLimitConfig::load("conf/ratelimit.yaml")
+        .await
+        .context("failed to load conf/ratelimit.yaml")?;
     let _log_guard = kraken_ui::app::initialize_logging(&config)
         .context("failed to initialize JSONL logging")?;
     let listen_address: SocketAddr = config
@@ -32,12 +35,16 @@ async fn main() -> anyhow::Result<()> {
             .context("failed to load the TLS certificate chain or private key")?;
     let server_handle = axum_server::Handle::new();
     let application = AppFactory::new(config)
+        .with_rate_limit_config(rate_limit_config.clone())
         .with_server_handle(server_handle.clone())
         .build()
         .await?;
 
     info!(%listen_address, "starting Kraken UI with mandatory TLS");
-    axum_server::bind_rustls(listen_address, tls_config)
+    let acceptor = RustlsAcceptor::new(tls_config)
+        .handshake_timeout(rate_limit_config.tls_handshake_timeout());
+    axum_server::bind(listen_address)
+        .acceptor(acceptor)
         .handle(server_handle)
         .serve(application.into_make_service_with_connect_info::<SocketAddr>())
         .await

@@ -1,25 +1,92 @@
-use std::net::SocketAddr;
+use std::{
+    collections::HashMap,
+    net::{IpAddr, SocketAddr},
+    sync::{Arc, Mutex, Weak},
+    time::Duration,
+};
 
 use axum::{
     extract::{ConnectInfo, Request, State},
-    http::StatusCode,
+    http::{HeaderValue, StatusCode, header::RETRY_AFTER},
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use tokio::sync::Semaphore;
 
 use crate::state::AppState;
 
-/// A global, per-IP request cap applied to every route as defence in depth.
-///
-/// The client address is read from the request extensions (populated by
-/// `into_make_service_with_connect_info`). When it is absent — for example in
-/// unit tests that drive the router directly — the limiter is skipped rather
-/// than rejecting the request.
-pub async fn apply(State(state): State<AppState>, request: Request, next: Next) -> Response {
-    if let Some(ConnectInfo(peer)) = request.extensions().get::<ConnectInfo<SocketAddr>>()
-        && !state.request_rate_limiter.check(&peer.ip().to_string())
-    {
-        return (StatusCode::TOO_MANY_REQUESTS, "Too many requests").into_response();
+#[derive(Debug)]
+pub struct IpConcurrencyLimiter {
+    max_per_ip: usize,
+    semaphores: Mutex<HashMap<IpAddr, Weak<Semaphore>>>,
+}
+
+impl IpConcurrencyLimiter {
+    pub fn new(max_per_ip: usize) -> Self {
+        Self {
+            max_per_ip,
+            semaphores: Mutex::new(HashMap::new()),
+        }
     }
-    next.run(request).await
+
+    fn semaphore(&self, ip: IpAddr) -> Option<Arc<Semaphore>> {
+        let mut semaphores = self.semaphores.lock().ok()?;
+        semaphores.retain(|_, semaphore| semaphore.strong_count() > 0);
+        if let Some(semaphore) = semaphores.get(&ip).and_then(Weak::upgrade) {
+            return Some(semaphore);
+        }
+        let semaphore = Arc::new(Semaphore::new(self.max_per_ip));
+        semaphores.insert(ip, Arc::downgrade(&semaphore));
+        Some(semaphore)
+    }
+}
+
+/// Applies the persistent GCRA limit and a non-queuing concurrency ceiling.
+///
+/// `ConnectInfo` is installed by the real server. Direct router tests without
+/// it skip this layer; axum-governor independently enforces its extractor.
+pub async fn apply(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let Some(ConnectInfo(peer)) = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .copied()
+    else {
+        return next.run(request).await;
+    };
+
+    let Some(semaphore) = state.ip_concurrency_limiter.semaphore(peer.ip()) else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Rate limiter temporarily unavailable",
+        )
+            .into_response();
+    };
+    let Ok(_permit) = semaphore.try_acquire_owned() else {
+        return rate_limited(Duration::from_secs(1));
+    };
+
+    if let Some(limiter) = &state.persistent_rate_limiter {
+        let decision = limiter.check(&peer.ip().to_string()).await;
+        if !decision.allowed {
+            return rate_limited(decision.retry_after);
+        }
+    }
+
+    match tokio::time::timeout(state.request_timeout, next.run(request)).await {
+        Ok(response) => response,
+        Err(_) => (
+            StatusCode::REQUEST_TIMEOUT,
+            "Request exceeded connection_timeout_secs",
+        )
+            .into_response(),
+    }
+}
+
+fn rate_limited(retry_after: Duration) -> Response {
+    let seconds = retry_after.as_secs().max(1);
+    let mut response = (StatusCode::TOO_MANY_REQUESTS, "Too many requests").into_response();
+    if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
+        response.headers_mut().insert(RETRY_AFTER, value);
+    }
+    response
 }

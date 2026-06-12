@@ -27,11 +27,12 @@ use crate::{
     security::{
         headers,
         password::{MediumOrStrongPasswordPolicy, PasswordPolicy},
-        rate_limit::{AccountFailureMonitor, IpRateLimiter, LoginThrottle},
+        rate_limit::{AccountFailureMonitor, LoginThrottle},
         sanitize,
     },
     services::{
         password_crypto::{DryocPasswordCryptoService, PasswordCryptoService},
+        rate_limit::{PersistentRateLimiter, RateLimitConfig},
         source_update::SourceUpdateService,
         waf_metrics::WafMetricsService,
     },
@@ -43,6 +44,7 @@ pub struct AppFactory {
     password_crypto: Option<Arc<dyn PasswordCryptoService>>,
     waf_metrics: Option<WafMetricsService>,
     server_handle: Option<Handle<SocketAddr>>,
+    rate_limit_config: Option<RateLimitConfig>,
 }
 
 impl AppFactory {
@@ -52,6 +54,7 @@ impl AppFactory {
             password_crypto: None,
             waf_metrics: None,
             server_handle: None,
+            rate_limit_config: None,
         }
     }
 
@@ -70,7 +73,24 @@ impl AppFactory {
         self
     }
 
+    pub fn with_rate_limit_config(mut self, config: RateLimitConfig) -> Self {
+        self.rate_limit_config = Some(config);
+        self
+    }
+
     pub async fn build(self) -> anyhow::Result<Router> {
+        let rate_limit_config = match self.rate_limit_config {
+            Some(config) => config,
+            None => RateLimitConfig::load("conf/ratelimit.yaml")
+                .await
+                .context("failed to load conf/ratelimit.yaml")?,
+        };
+        let persistent_rate_limiter = if rate_limit_config.enabled {
+            Some(PersistentRateLimiter::from_config(&rate_limit_config).await?)
+        } else {
+            warn!("global request rate limiting is disabled by conf/ratelimit.yaml");
+            None
+        };
         let database = database::connect(&self.config.database_path).await?;
         let waf_database = match &self.config.waf_database_path {
             Some(path) if path.exists() => Some(database::connect_read_only(path).await?),
@@ -131,7 +151,11 @@ impl AppFactory {
             waf_metrics,
             session_store: session_store.clone(),
             login_throttle: Arc::new(LoginThrottle::with_defaults()),
-            request_rate_limiter: Arc::new(IpRateLimiter::with_defaults()),
+            persistent_rate_limiter,
+            ip_concurrency_limiter: Arc::new(rate_limit::IpConcurrencyLimiter::new(
+                rate_limit_config.max_coroutines_per_ip,
+            )),
+            request_timeout: rate_limit_config.connection_timeout(),
             account_failure_monitor: Arc::new(AccountFailureMonitor::with_defaults()),
             first_time_lock: Arc::new(tokio::sync::Mutex::new(())),
             source_update,
@@ -170,7 +194,11 @@ impl AppFactory {
                 rate_limit_state,
                 rate_limit::apply,
             ));
-        Ok(application)
+        if rate_limit_config.enabled {
+            Ok(application.layer(rate_limit_config.governor_layer()?))
+        } else {
+            Ok(application)
+        }
     }
 }
 
@@ -305,11 +333,12 @@ async fn bootstrap_administrator(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{net::SocketAddr, sync::Arc};
 
     use anyhow::bail;
     use axum::{
         body::Body,
+        extract::ConnectInfo,
         http::{Request, StatusCode},
     };
     use tower::ServiceExt;
@@ -384,6 +413,11 @@ mod tests {
             .unwrap_or_else(|error| panic!("test application must build: {error}"));
         let request = Request::builder()
             .uri("/health")
+            .extension(ConnectInfo(
+                "127.0.0.1:40001"
+                    .parse::<SocketAddr>()
+                    .expect("valid test peer"),
+            ))
             .body(Body::empty())
             .unwrap_or_else(|error| panic!("health request must be valid: {error}"));
         let response = application
@@ -437,6 +471,11 @@ mod tests {
             .unwrap_or_else(|error| panic!("test application must build: {error}"));
         let request = Request::builder()
             .uri("/kraken_ui/auth/mfa_challenge")
+            .extension(ConnectInfo(
+                "127.0.0.1:40002"
+                    .parse::<SocketAddr>()
+                    .expect("valid test peer"),
+            ))
             .body(Body::empty())
             .unwrap_or_else(|error| panic!("challenge request must be valid: {error}"));
         let response = application
