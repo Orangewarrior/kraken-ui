@@ -7,6 +7,7 @@ pub mod error;
 pub mod middleware;
 pub mod models;
 pub mod routes;
+mod secrets;
 pub mod security;
 pub mod services;
 pub mod state;

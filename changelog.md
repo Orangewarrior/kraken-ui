@@ -2,6 +2,39 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.12.0 - 2026-06-12
+
+Kraken UI now supports the authenticated observability channel introduced by
+current KrakenWAF releases.
+
+### Added
+
+- Authenticate `/metrics` and the compatibility `/__kwaf/metrics` request with
+  `Authorization: Bearer <token>`.
+- Resolve `BEARER_PASSWORD` with the same file-first contract as KrakenWAF:
+  `BEARER_PASSWORD_FILE`, `/run/secrets/krakenwaf/BEARER_PASSWORD`, then the
+  plain environment variable.
+- Add a systemd credential drop-in that lets Kraken UI and KrakenWAF use the
+  same root-owned token source without placing the token itself in
+  `Environment=`.
+- Add a dedicated deployment and troubleshooting guide at
+  `docs/waf-bearer-auth.md`.
+
+### Security
+
+- Reject empty or non-ASCII bearer tokens before building the HTTP client.
+- Mark the generated `Authorization` header as sensitive so its value is
+  redacted by HTTP-layer diagnostics.
+- Keep the existing pinned TLS trust for the WAF metrics connection.
+
+### Changed
+
+- Standardize the KrakenWAF observability endpoint examples on
+  `https://127.0.0.1:4343`.
+- Expand dashboard diagnostics to mention `BEARER_PASSWORD` when observability
+  data is unavailable.
+- Bump the package version from `0.11.0` to `0.12.0`.
+
 ## 0.11.0 - 2026-06-09
 
 A security and quality hardening pass spanning AppSec, the runtime, Rust quality

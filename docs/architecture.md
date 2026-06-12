@@ -55,11 +55,13 @@ second SeaORM connection in **read-only** mode, so the console can never modify
 the WAF's data.
 
 **Metrics are pulled over HTTPS, with the channel pinned.** `WafMetricsService`
-uses the configured certificate to query `waf-endpoint/metrics`, falling back to
-`/__kwaf/metrics`. When a custom CA is supplied it trusts *only* that CA (the
-system root store is disabled), so the channel cannot be intercepted by another
-publicly trusted CA. The parser understands the Prometheus exposition format and
-never executes the content it receives.
+uses the configured certificate to query `waf-endpoint/metrics` on KrakenWAF's
+dedicated observability port (default `4343`), falling back to
+`/__kwaf/metrics`. It attaches the `BEARER_PASSWORD` credential resolved through
+the same file-first chain as KrakenWAF. When a custom CA is supplied it trusts
+*only* that CA (the system root store is disabled), so the channel cannot be
+intercepted by another publicly trusted CA. The parser understands the
+Prometheus exposition format and never executes the content it receives.
 
 **Sessions are persistent and server-side.** `SeaOrmSessionStore` keeps session
 records in SQLite, so they survive a restart and can be revoked by deleting a

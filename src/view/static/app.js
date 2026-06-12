@@ -525,7 +525,7 @@
       });
       if (errorRoot && (!data.metrics_available || !data.database_available)) {
         errorRoot.hidden = false;
-        errorRoot.textContent = "Some observability data is unavailable. Check waf_endpoint, the certificate and db_local.";
+        errorRoot.textContent = "Some observability data is unavailable. Check waf-endpoint, waf-cert-ca, BEARER_PASSWORD and db_local.";
       }
       drawPie(qs("[data-cmc-pie]"), qs("[data-cmc-legend]"), data.cmc_detections || []);
       drawBars(qs("[data-module-bars]"), data.module_blocks || []);

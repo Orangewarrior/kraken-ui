@@ -22,7 +22,7 @@ use crate::{
         operator_repository::{NewOperator, OperatorRepository},
         session_store::SeaOrmSessionStore,
     },
-    routes,
+    routes, secrets,
     security::{
         headers,
         password::{MediumOrStrongPasswordPolicy, PasswordPolicy},
@@ -84,15 +84,27 @@ impl AppFactory {
         let waf_metrics = match self.waf_metrics {
             Some(service) => service,
             None => {
+                let bearer_token = secrets::load_secret("BEARER_PASSWORD");
+                if bearer_token.is_some() {
+                    info!(
+                        "WAF observability bearer authentication enabled for the metrics channel"
+                    );
+                } else {
+                    warn!(
+                        "BEARER_PASSWORD is not configured; WAF metrics requests will be sent \
+                         without Authorization and only work when KrakenWAF's bearer gate is disabled"
+                    );
+                }
                 if self.config.waf_certificate_path.is_none() {
                     warn!(
                         "waf-cert-ca is not set; trusting the UI's own cert-ca for the WAF metrics \
                          channel. Set waf-cert-ca explicitly if KrakenWAF presents a different CA."
                     );
                 }
-                WafMetricsService::new(
+                WafMetricsService::new_with_bearer_token(
                     &self.config.waf_endpoint,
                     self.config.waf_certificate_path(),
+                    bearer_token.as_deref(),
                 )
                 .await?
             }
@@ -345,7 +357,7 @@ mod tests {
             listen: "127.0.0.1:3443".to_owned(),
             database_path: database_path.clone(),
             waf_database_path: None,
-            waf_endpoint: "https://127.0.0.1:8443".to_owned(),
+            waf_endpoint: "https://127.0.0.1:4343".to_owned(),
             waf_certificate_path: None,
             log_directory: std::env::temp_dir(),
             session_timeout_minutes: 30,
@@ -353,7 +365,7 @@ mod tests {
         let application = AppFactory::new(config)
             .with_password_crypto(Arc::new(TestPasswordCrypto))
             .with_waf_metrics(
-                WafMetricsService::without_custom_ca("https://127.0.0.1:8444")
+                WafMetricsService::without_custom_ca("https://127.0.0.1:4343")
                     .unwrap_or_else(|error| panic!("test metrics client must build: {error}")),
             )
             .build()
@@ -398,7 +410,7 @@ mod tests {
             listen: "127.0.0.1:3443".to_owned(),
             database_path: database_path.clone(),
             waf_database_path: None,
-            waf_endpoint: "https://127.0.0.1:8443".to_owned(),
+            waf_endpoint: "https://127.0.0.1:4343".to_owned(),
             waf_certificate_path: None,
             log_directory: std::env::temp_dir(),
             session_timeout_minutes: 30,
@@ -406,7 +418,7 @@ mod tests {
         let application = AppFactory::new(config)
             .with_password_crypto(Arc::new(TestPasswordCrypto))
             .with_waf_metrics(
-                WafMetricsService::without_custom_ca("https://127.0.0.1:8444")
+                WafMetricsService::without_custom_ca("https://127.0.0.1:4343")
                     .unwrap_or_else(|error| panic!("test metrics client must build: {error}")),
             )
             .build()

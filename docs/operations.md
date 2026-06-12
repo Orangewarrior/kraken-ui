@@ -31,6 +31,7 @@ in.
 | `KRAKEN_UI_ALLOW_EPHEMERAL_SESSION_KEY` | Allows a generated ephemeral signing key in a release build (development only; debug builds always allow it). Sessions then do not survive a restart. |
 | `KRAKEN_UI_ADMIN_PASSWORD` / `KRAKEN_UI_ADMIN_EMAIL` | Bootstrap the first administrator at start-up. |
 | `KRAKEN_UI_FIRST_TIME_TOKEN` | Optional shared secret required by the `first_time` endpoint, in addition to the loopback check. |
+| `BEARER_PASSWORD_FILE` / `BEARER_PASSWORD` | KrakenWAF observability bearer token. Uses the same names and resolution order as KrakenWAF. |
 | `RUST_LOG` | Log level filter. |
 
 Key files referenced by `*_KEY_FILE` must not be readable by group or others on
@@ -38,10 +39,39 @@ Unix, or the application refuses to start.
 
 ## WAF metrics trust
 
-The metrics client connects to `waf-endpoint` over HTTPS. Set `waf-cert-ca` to
-the CA the WAF presents. If it is left unset, the UI falls back to its own
-`cert-ca` and logs a warning at start-up; this only works if both services share
-a CA, so prefer setting it explicitly.
+The metrics client connects to the dedicated KrakenWAF observability listener,
+which defaults to `https://127.0.0.1:4343`. Set `waf-cert-ca` to the CA the WAF
+presents. If it is left unset, the UI falls back to its own `cert-ca` and logs a
+warning at start-up; this only works if both services share a CA, so prefer
+setting it explicitly.
+
+Every metrics request carries `Authorization: Bearer <token>` when
+`BEARER_PASSWORD` is available. The token is resolved with the exact same
+file-first chain used by KrakenWAF:
+
+1. `BEARER_PASSWORD_FILE`
+2. `/run/secrets/krakenwaf/BEARER_PASSWORD`
+3. `BEARER_PASSWORD`
+
+File contents are trimmed. Empty or unreadable files fall through to the next
+source. The token is marked sensitive in the HTTP client and is never logged.
+When no token is configured, Kraken UI starts with a warning and sends metrics
+requests without the header for compatibility with a KrakenWAF instance whose
+bearer gate is disabled.
+
+For systemd, both services can load the same root-owned source file into their
+own private credential directories:
+
+```ini
+[Service]
+LoadCredential=BEARER_PASSWORD:/etc/krakenwaf/secrets/BEARER_PASSWORD
+Environment=BEARER_PASSWORD_FILE=%d/BEARER_PASSWORD
+```
+
+See [`../deploy/systemd/kraken-ui-bearer.conf`](../deploy/systemd/kraken-ui-bearer.conf)
+for a ready-to-install drop-in. The complete integration guide, including
+development commands and `401`/`403` diagnosis, is in
+[waf-bearer-auth.md](waf-bearer-auth.md).
 
 ## Database
 

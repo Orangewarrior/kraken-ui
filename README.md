@@ -2,6 +2,8 @@
 
 > The secure-by-default admin console for [KrakenWAF](https://github.com/Orangewarrior/KrakenWaf) — built in Rust.
 
+**Current version: 0.12.0**
+
 Kraken UI is a small, hardened web application for operating a KrakenWAF
 deployment: manage operators, watch blocked attacks in real time, and read live
 WAF metrics from a single TLS-only console. It is written in Rust with
@@ -23,7 +25,8 @@ inline JavaScript.
   [docs/mfa.md](docs/mfa.md).
 - **Auditable.** Authentication and operator-administration events are written
   to a dedicated `audit.jsonl`, and the WAF metrics channel is pinned to the
-  certificate you configure.
+  certificate you configure and authenticated with KrakenWAF's shared bearer
+  token.
 - **No surprises in your dependency tree.** Every transitive licence exception
   is pinned in `deny.toml`, and CI runs Clippy, Semgrep, CodeQL, cargo-audit,
   cargo-deny and OSV Scanner on every push.
@@ -56,7 +59,7 @@ key: certs/key.pem
 listen: "127.0.0.1:3443"
 db-local: db/kraken-ui.sqlite
 db_local: "../KrakenWAF/logs/db/vulns_alert.db"
-waf-endpoint: "https://127.0.0.1:8443"
+waf-endpoint: "https://127.0.0.1:4343"
 waf-cert-ca: "../KrakenWAF/certs/cert.pem"
 log-dir: log
 session-timeout-minutes: 30
@@ -70,8 +73,21 @@ export KRAKEN_UI_PASSWORD_KEY="$(openssl rand -base64 32)"
 export KRAKEN_UI_PASSWORD_KEY_ID='primary-v1'
 ```
 
-In production, prefer a file with `0600` permissions (the application refuses
-keys that are readable by group or others):
+**3. Provide the KrakenWAF observability bearer token.** KrakenWAF's dedicated
+listener on port `4343` and Kraken UI must resolve the same value:
+
+```bash
+export BEARER_PASSWORD="$(openssl rand -hex 32)"
+```
+
+Resolution order is `BEARER_PASSWORD_FILE`,
+`/run/secrets/krakenwaf/BEARER_PASSWORD`, then `BEARER_PASSWORD`. When both
+services run on the same host, they can read the same mounted secret or systemd
+credential. See [WAF bearer authentication](docs/waf-bearer-auth.md) for file,
+systemd and troubleshooting examples.
+
+For the UI encryption key in production, prefer a file with `0600` permissions
+(the application refuses key files that are readable by group or others):
 
 ```bash
 openssl rand -base64 32 > /secure/path/kraken-ui-password.key
@@ -86,7 +102,7 @@ sessions survive restarts and validate across replicas:
 export KRAKEN_UI_SESSION_KEY="$(openssl rand -base64 64)"
 ```
 
-**3. Create the first administrator** and run the app:
+**4. Create the first administrator** and run the app:
 
 ```bash
 export KRAKEN_UI_ADMIN_PASSWORD='Use-A-Unique!Strong9Password'
@@ -188,6 +204,8 @@ src/
 For the bigger picture, see the [`docs/`](docs/) directory:
 
 - [Architecture](docs/architecture.md) — how the pieces fit together.
+- [WAF bearer authentication](docs/waf-bearer-auth.md) — shared token loading,
+  port `4343`, systemd and troubleshooting.
 - [Security](docs/security.md) — the controls and why they exist.
 - [Security review](docs/security-review.md) — standing findings and their status.
 - [Database & ACL](docs/database.md) — schema, sessions and routes.

@@ -1,13 +1,17 @@
 use std::{collections::HashMap, path::Path, time::Duration};
 
 use anyhow::{Context, bail};
-use reqwest::{Certificate, Client};
+use reqwest::{
+    Certificate, Client, RequestBuilder,
+    header::{ACCEPT, AUTHORIZATION, HeaderValue},
+};
 use serde::Serialize;
 
 #[derive(Clone)]
 pub struct WafMetricsService {
     client: Client,
     endpoint: String,
+    authorization: Option<HeaderValue>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -33,6 +37,13 @@ pub struct ModuleMetric {
 
 impl WafMetricsService {
     pub fn without_custom_ca(endpoint: &str) -> anyhow::Result<Self> {
+        Self::without_custom_ca_and_token(endpoint, None)
+    }
+
+    fn without_custom_ca_and_token(
+        endpoint: &str,
+        bearer_token: Option<&str>,
+    ) -> anyhow::Result<Self> {
         let client = Client::builder()
             .https_only(true)
             .timeout(Duration::from_secs(5))
@@ -41,10 +52,19 @@ impl WafMetricsService {
         Ok(Self {
             client,
             endpoint: endpoint.trim_end_matches('/').to_owned(),
+            authorization: authorization_header(bearer_token)?,
         })
     }
 
     pub async fn new(endpoint: &str, certificate_path: &Path) -> anyhow::Result<Self> {
+        Self::new_with_bearer_token(endpoint, certificate_path, None).await
+    }
+
+    pub async fn new_with_bearer_token(
+        endpoint: &str,
+        certificate_path: &Path,
+        bearer_token: Option<&str>,
+    ) -> anyhow::Result<Self> {
         let certificate_bytes = tokio::fs::read(certificate_path)
             .await
             .with_context(|| format!("failed to read WAF CA {}", certificate_path.display()))?;
@@ -63,6 +83,7 @@ impl WafMetricsService {
         Ok(Self {
             client,
             endpoint: endpoint.trim_end_matches('/').to_owned(),
+            authorization: authorization_header(bearer_token)?,
         })
     }
 
@@ -81,9 +102,7 @@ impl WafMetricsService {
 
     async fn fetch_url(&self, url: &str) -> anyhow::Result<WafMetricsSnapshot> {
         let response = self
-            .client
-            .get(url)
-            .header(reqwest::header::ACCEPT, "text/plain")
+            .request(url)
             .send()
             .await
             .context("failed to request WAF metrics")?;
@@ -96,6 +115,27 @@ impl WafMetricsService {
             .context("failed to read WAF metrics response")?;
         Ok(parse_prometheus(&body))
     }
+
+    fn request(&self, url: &str) -> RequestBuilder {
+        let request = self.client.get(url).header(ACCEPT, "text/plain");
+        match &self.authorization {
+            Some(authorization) => request.header(AUTHORIZATION, authorization),
+            None => request,
+        }
+    }
+}
+
+fn authorization_header(bearer_token: Option<&str>) -> anyhow::Result<Option<HeaderValue>> {
+    let Some(token) = bearer_token else {
+        return Ok(None);
+    };
+    if token.is_empty() || !token.is_ascii() {
+        bail!("BEARER_PASSWORD must be a non-empty ASCII bearer token");
+    }
+    let mut value = HeaderValue::from_str(&format!("Bearer {token}"))
+        .context("BEARER_PASSWORD must be a valid ASCII bearer token")?;
+    value.set_sensitive(true);
+    Ok(Some(value))
 }
 
 fn parse_prometheus(input: &str) -> WafMetricsSnapshot {
@@ -164,7 +204,9 @@ fn metric(values: &HashMap<&str, f64>, name: &str) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_prometheus;
+    use reqwest::header::{AUTHORIZATION, HeaderValue};
+
+    use super::{WafMetricsService, authorization_header, parse_prometheus};
 
     #[test]
     fn parses_scalar_and_module_metrics() {
@@ -177,5 +219,43 @@ mod tests {
         assert_eq!(snapshot.requests_inspected, 12.0);
         assert_eq!(snapshot.request_duration_count, 4.0);
         assert_eq!(snapshot.module_blocks[0].module, "ssti_detect");
+    }
+
+    #[test]
+    fn bearer_token_is_attached_and_marked_sensitive() {
+        let service = WafMetricsService::without_custom_ca_and_token(
+            "https://127.0.0.1:4343/",
+            Some("token"),
+        )
+        .expect("metrics client");
+        let request = service
+            .request("https://127.0.0.1:4343/metrics")
+            .build()
+            .expect("request");
+        let authorization = request
+            .headers()
+            .get(AUTHORIZATION)
+            .expect("authorization header");
+
+        assert_eq!(authorization, &HeaderValue::from_static("Bearer token"));
+        assert!(authorization.is_sensitive());
+    }
+
+    #[test]
+    fn missing_token_omits_authorization_header() {
+        let service =
+            WafMetricsService::without_custom_ca("https://127.0.0.1:4343").expect("metrics client");
+        let request = service
+            .request("https://127.0.0.1:4343/metrics")
+            .build()
+            .expect("request");
+
+        assert!(!request.headers().contains_key(AUTHORIZATION));
+    }
+
+    #[test]
+    fn rejects_non_ascii_bearer_token() {
+        let error = authorization_header(Some("inválido")).expect_err("non-ASCII token");
+        assert!(error.to_string().contains("ASCII bearer token"));
     }
 }
