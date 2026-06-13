@@ -83,7 +83,7 @@ pub async fn login_submit(
     let ip_key = format!("ip:{client_ip}");
 
     // Throttle by source IP before doing any expensive work.
-    if let Some(remaining) = state.login_throttle.locked_for(&ip_key) {
+    if let Some(remaining) = state.rate_limiting.login_throttle.locked_for(&ip_key) {
         audit_login(&client_ip, "", "locked");
         return locked_login_response(token, remaining).await;
     }
@@ -95,7 +95,7 @@ pub async fn login_submit(
     // of their account from unrelated addresses (an account-lockout DoS).
     let ip_user_key = format!("ip:{client_ip}|user:{username}");
 
-    if let Some(remaining) = state.login_throttle.locked_for(&ip_user_key) {
+    if let Some(remaining) = state.rate_limiting.login_throttle.locked_for(&ip_user_key) {
         audit_login(&client_ip, &username, "locked");
         return locked_login_response(token, remaining).await;
     }
@@ -155,8 +155,11 @@ pub async fn login_submit(
     }
 
     // Successful password authentication: clear any recorded failures.
-    state.login_throttle.record_success(&ip_key);
-    state.login_throttle.record_success(&ip_user_key);
+    state.rate_limiting.login_throttle.record_success(&ip_key);
+    state
+        .rate_limiting
+        .login_throttle
+        .record_success(&ip_user_key);
 
     // If the account has two-factor enabled, the password is only the first step.
     // Park a "pending" marker on a fresh session id and send the operator to the
@@ -220,7 +223,7 @@ pub async fn mfa_verify(
     // Throttle code guessing per source IP and pending account, mirroring the
     // password path, so a six-digit code cannot be brute-forced online.
     let throttle_key = format!("mfa:{client_ip}|user:{id_user}");
-    if let Some(remaining) = state.login_throttle.locked_for(&throttle_key) {
+    if let Some(remaining) = state.rate_limiting.login_throttle.locked_for(&throttle_key) {
         audit_login(&client_ip, "", "mfa_locked");
         return locked_mfa_response(token, remaining).await;
     }
@@ -235,7 +238,10 @@ pub async fn mfa_verify(
 
     let mfa = OperatorMfaRepository::new(state.database.clone(), state.password_crypto.clone());
     if code.len() > 32 || !mfa.verify_login_code(id_user, &code).await? {
-        state.login_throttle.record_failure(&throttle_key);
+        state
+            .rate_limiting
+            .login_throttle
+            .record_failure(&throttle_key);
         audit_login(&client_ip, &operator.username, "mfa_failed");
         return mfa_challenge_response(token, "Invalid or expired code").await;
     }
@@ -248,7 +254,10 @@ pub async fn mfa_verify(
         return Ok(Redirect::to("/kraken_ui/login").into_response());
     }
 
-    state.login_throttle.record_success(&throttle_key);
+    state
+        .rate_limiting
+        .login_throttle
+        .record_success(&throttle_key);
     clear_mfa_pending(&session).await?;
     establish_session(&session, &operator).await?;
     audit_login(&client_ip, &operator.username, "success");
@@ -390,11 +399,19 @@ fn register_login_failure(
     username: &str,
     client_ip: &str,
 ) {
-    state.login_throttle.record_failure(ip_key);
-    state.login_throttle.record_failure(ip_user_key);
+    state.rate_limiting.login_throttle.record_failure(ip_key);
+    state
+        .rate_limiting
+        .login_throttle
+        .record_failure(ip_user_key);
     // Detection only: surface a single account drawing failures from many sources,
     // which per-IP throttling (deliberately) cannot see. This never locks anything.
-    if !username.is_empty() && state.account_failure_monitor.note_failure(username) {
+    if !username.is_empty()
+        && state
+            .rate_limiting
+            .account_failure_monitor
+            .note_failure(username)
+    {
         warn!(
             target: "audit",
             event = "account_guessing_suspected",

@@ -94,8 +94,10 @@ not contain the username. Spaces are allowed, so passphrases are practical.
 
 Alternatively, the one-shot `first_time` endpoint accepts a single loopback POST
 while the operators table is empty. It rejects requests that carry proxy
-forwarding headers, and when `KRAKEN_UI_FIRST_TIME_TOKEN` is set it additionally
-requires that token (sent as a `token` form field, compared in constant time).
+forwarding headers and requires a bootstrap token: `KRAKEN_UI_FIRST_TIME_TOKEN`
+is **mandatory in release builds** (the request is refused without it) and
+optional in debug builds. When set, the token is sent as a `token` form field
+and compared in constant time.
 
 ## The password envelope
 

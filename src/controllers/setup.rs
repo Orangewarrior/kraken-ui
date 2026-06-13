@@ -56,18 +56,33 @@ pub async fn first_time(
             "first_time refuses proxied requests; run it directly against loopback",
         ));
     }
-    // When a bootstrap token is configured, require it in addition to the
-    // loopback check. This is the recommended posture for any host that is not
-    // strictly single-tenant during bootstrap.
-    match env::var(FIRST_TIME_TOKEN_ENV) {
-        Ok(expected)
-            if !expected.is_empty()
-                && !constant_time_eq(form.token.as_bytes(), expected.as_bytes()) =>
+    // A bootstrap token is required in addition to the loopback check. It is
+    // mandatory in release builds and optional in debug builds; an empty value
+    // counts as unset.
+    match env::var(FIRST_TIME_TOKEN_ENV)
+        .ok()
+        .filter(|token| !token.is_empty())
+    {
+        Some(expected)
+            if !crate::security::constant_time_eq(form.token.as_bytes(), expected.as_bytes()) =>
         {
             warn!("rejected first_time request with an invalid bootstrap token");
             return Ok(forbidden("invalid bootstrap token"));
         }
-        _ => {}
+        Some(_) => {}
+        // No token configured: optional in debug builds, but release builds fail
+        // closed so the endpoint cannot be reached on a loopback-shaped request
+        // alone. This mirrors the session-signing-key policy.
+        None => {
+            if !cfg!(debug_assertions) {
+                warn!(
+                    "rejected first_time request: KRAKEN_UI_FIRST_TIME_TOKEN is required in release builds"
+                );
+                return Ok(forbidden(
+                    "first_time requires KRAKEN_UI_FIRST_TIME_TOKEN to be set",
+                ));
+            }
+        }
     }
     let _guard = state.first_time_lock.lock().await;
     let repository = OperatorRepository::new(state.database.clone(), state.password_crypto.clone());
@@ -159,19 +174,6 @@ fn has_forwarding_headers(headers: &HeaderMap) -> bool {
     ]
     .iter()
     .any(|name| headers.contains_key(*name))
-}
-
-/// Compares two byte slices in time that does not depend on the contents, only
-/// the length, so a configured bootstrap token cannot be recovered by timing.
-fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-    let mut difference = 0_u8;
-    for (a, b) in left.iter().zip(right.iter()) {
-        difference |= a ^ b;
-    }
-    difference == 0
 }
 
 #[cfg(test)]

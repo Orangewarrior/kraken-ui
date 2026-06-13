@@ -36,7 +36,7 @@ use crate::{
         source_update::SourceUpdateService,
         waf_metrics::WafMetricsService,
     },
-    state::AppState,
+    state::{AppState, RateLimiting},
 };
 
 pub struct AppFactory {
@@ -99,7 +99,7 @@ impl AppFactory {
                 None
             }
             None => {
-                warn!("db_local is not configured; attack views will be empty");
+                warn!("db-waf-alerts is not configured; attack views will be empty");
                 None
             }
         };
@@ -150,13 +150,15 @@ impl AppFactory {
             password_crypto,
             waf_metrics,
             session_store: session_store.clone(),
-            login_throttle: Arc::new(LoginThrottle::with_defaults()),
-            persistent_rate_limiter,
-            ip_concurrency_limiter: Arc::new(rate_limit::IpConcurrencyLimiter::new(
-                rate_limit_config.max_coroutines_per_ip,
-            )),
-            request_timeout: rate_limit_config.connection_timeout(),
-            account_failure_monitor: Arc::new(AccountFailureMonitor::with_defaults()),
+            rate_limiting: RateLimiting {
+                login_throttle: Arc::new(LoginThrottle::with_defaults()),
+                account_failure_monitor: Arc::new(AccountFailureMonitor::with_defaults()),
+                persistent: persistent_rate_limiter,
+                ip_concurrency: Arc::new(rate_limit::IpConcurrencyLimiter::new(
+                    rate_limit_config.max_coroutines_per_ip,
+                )),
+                request_timeout: rate_limit_config.connection_timeout(),
+            },
             first_time_lock: Arc::new(tokio::sync::Mutex::new(())),
             source_update,
         };

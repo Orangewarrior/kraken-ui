@@ -74,7 +74,7 @@ pub async fn view_waf_request(
     let Some(database) = state.waf_database.clone() else {
         return Ok((
             StatusCode::SERVICE_UNAVAILABLE,
-            "The WAF database configured in db_local is not available.",
+            "The WAF database configured in db-waf-alerts is not available.",
         )
             .into_response());
     };

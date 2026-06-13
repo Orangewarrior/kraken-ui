@@ -2,6 +2,46 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.15.0 - 2026-06-13
+
+### Security
+
+- Require `KRAKEN_UI_FIRST_TIME_TOKEN` for the `first_time` bootstrap endpoint in
+  release builds (fail closed); debug builds keep it optional.
+- Refuse an explicitly configured `*_FILE` secret (such as `BEARER_PASSWORD_FILE`)
+  when it is readable by group or others, while still warning — rather than
+  failing — for the platform-managed `/run/secrets/krakenwaf` mount.
+- Validate the `listen` socket address at configuration load time so a malformed
+  value is rejected at startup.
+
+### Changed
+
+- Rename the database configuration keys to `db-ui` (the UI's read-write
+  database) and `db-waf-alerts` (the read-only WAF alerts database), removing the
+  dangerous `db-local` / `db_local` near-collision. The previous names remain
+  accepted as deprecated aliases, and the two keys are validated to point at
+  different files.
+- Remove the unused legacy `conf/setup.conf`; `conf/setup.yaml` is the single
+  configuration file.
+- Replace the Ammonia HTML sanitiser on the CSRF and pagination request paths
+  with a constant-cost character check and direct integer parsing; the
+  cryptographic CSRF verification is unchanged.
+- Try the TOTP skew window current-step-first and document the replay-window
+  trade-off.
+- Group the request-throttling state in `AppState` behind a `RateLimiting`
+  struct, and amortise the per-IP concurrency limiter's dead-entry cleanup.
+
+### Removed
+
+- Delete the unused `AppError::unauthorized` / `AppError::bad_request` constructors
+  and `AppConfig::session_timeout`, and de-duplicate the constant-time comparison
+  and CSRF render helpers.
+
+### Added
+
+- Add an end-to-end integration test for the login, protected-page and logout
+  flow over the assembled router.
+
 ## 0.14.0 - 2026-06-12
 
 ### Added

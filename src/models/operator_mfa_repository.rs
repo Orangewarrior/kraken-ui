@@ -333,7 +333,10 @@ impl OperatorMfaRepository {
                 RECOVERY_DOMAIN,
                 &row.encrypted_code,
             )?;
-            if constant_time_eq(normalize_recovery(&stored).as_bytes(), candidate.as_bytes()) {
+            if crate::security::constant_time_eq(
+                normalize_recovery(&stored).as_bytes(),
+                candidate.as_bytes(),
+            ) {
                 let mut active = row.into_active_model();
                 active.used = Set(1);
                 active.used_at = Set(Some(current_timestamp()));
@@ -369,6 +372,15 @@ impl OperatorMfaRepository {
 /// clock skew on either side so a code entered near a period boundary still works.
 /// Returns the matching time-step (`unix_time / period`) so the caller can record
 /// it and refuse a later replay of the same code; `None` if it does not match.
+///
+/// Steps are tried current-first (`0`, then `-step`, then `+step`), so a code is
+/// attributed to the current window whenever it is valid there. The `+step`
+/// (future) window is only reached when the authenticator's clock runs ahead;
+/// recording that future step is still correct for replay prevention of that
+/// exact code. The only side effect is that, if a future-window code is consumed,
+/// a *different* current-window code presented moments later is rejected until the
+/// clock advances — a deliberate, sub-period trade-off that favours strict replay
+/// prevention over accepting a second code inside the same skew window.
 fn verify_totp_code(secret_base32: &str, code: &str) -> Option<u64> {
     let trimmed = code.trim();
     if trimmed.len() != 6 || !trimmed.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -378,7 +390,7 @@ fn verify_totp_code(secret_base32: &str, code: &str) -> Option<u64> {
     let totp = otpauth::TOTP::from_base32(secret_base32.to_owned())?;
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let step = TOTP_PERIOD as i64;
-    [-step, 0, step].into_iter().find_map(|delta| {
+    [0, -step, step].into_iter().find_map(|delta| {
         let timestamp = now + delta;
         if timestamp >= 0 && totp.verify(code_num, TOTP_PERIOD, timestamp as u64) {
             Some(timestamp as u64 / TOTP_PERIOD)
@@ -409,17 +421,6 @@ fn normalize_recovery(input: &str) -> String {
         .filter(char::is_ascii_alphanumeric)
         .map(|character| character.to_ascii_uppercase())
         .collect()
-}
-
-fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-    let mut difference = 0_u8;
-    for (a, b) in left.iter().zip(right.iter()) {
-        difference |= a ^ b;
-    }
-    difference == 0
 }
 
 #[cfg(test)]

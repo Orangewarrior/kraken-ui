@@ -1,8 +1,10 @@
+use anyhow::anyhow;
 use askama::Template;
 use axum::{
     http::StatusCode,
     response::{Html, IntoResponse, Response},
 };
+use axum_csrf::CsrfToken;
 
 use crate::error::AppError;
 
@@ -179,6 +181,22 @@ pub fn render<T: Template>(template: T) -> Result<Response, AppError> {
         .render()
         .map(|html| Html(html).into_response())
         .map_err(AppError::internal)
+}
+
+/// Renders a CSRF-protected page: mints an authenticity token, hands it to the
+/// `template` builder, renders the result and attaches the matching CSRF cookie.
+/// Shared by every controller that returns a form so the token plumbing lives in
+/// one place.
+pub fn render_with_csrf<T, F>(token: CsrfToken, template: F) -> Result<Response, AppError>
+where
+    T: Template,
+    F: FnOnce(String) -> T,
+{
+    let csrf_token = token
+        .authenticity_token()
+        .map_err(|error| AppError::internal(anyhow!("failed to create CSRF token: {error}")))?;
+    let response = render(template(csrf_token))?;
+    Ok((token, response).into_response())
 }
 
 pub fn csrf_error_response() -> Response {

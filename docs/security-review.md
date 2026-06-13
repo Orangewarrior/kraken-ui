@@ -177,6 +177,37 @@ A further pass after the 0.10.x two-factor work:
   false` on checkouts, a concurrency guard, Semgrep promoted to a blocking gate,
   and Dependabot for GitHub Actions and Cargo.
 
+## Hardening added in 0.15.0
+
+A refactoring and AppSec pass focused on configuration safety and removing
+expensive work from request hot paths:
+
+- **Database keys disambiguated.** The UI credential store and the read-only WAF
+  alerts database were configured by `db-local` and `db_local`, one underscore
+  apart. They are now `db-ui` and `db-waf-alerts` (the old names remain as
+  deprecated aliases), the load step validates that they reference different
+  files, and the stray legacy `conf/setup.conf` was removed.
+- **`first_time` token mandatory in release.** The bootstrap endpoint now fails
+  closed without `KRAKEN_UI_FIRST_TIME_TOKEN` in release builds, matching the
+  session-signing-key policy; debug builds keep it optional.
+- **Secret-file permissions enforced consistently.** An explicitly configured
+  `*_FILE` secret (e.g. `BEARER_PASSWORD_FILE`) is refused when it is readable by
+  group or others, rather than only the encryption and session keys; the
+  conventional `/run/secrets/krakenwaf` mount warns instead, so platform-managed
+  secrets are not broken.
+- **HTML parsing removed from hot paths.** CSRF token validation and numeric
+  pagination parameters no longer run the Ammonia HTML sanitiser on every request;
+  a constant-cost character-class check and direct integer parsing replace it,
+  with the cryptographic CSRF check unchanged.
+- **TOTP verification documented and ordered current-first.** The skew window is
+  now tried current-step-first, and the interaction between recording a used step
+  and the ±1 skew window is documented.
+- **End-to-end auth test.** A new integration test drives the full login → CSRF →
+  session → protected page → logout round trip over the assembled router.
+- **Dead code removed.** Unused `AppError` constructors and `AppConfig::session_timeout`
+  were deleted; the `listen` address is now validated at load time; and the
+  duplicated constant-time comparison and CSRF render helpers were unified.
+
 ## Remaining follow-ups
 
 Intentionally out of scope, tracked for later:

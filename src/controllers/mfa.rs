@@ -22,7 +22,7 @@ use crate::{
     security::{csrf, sanitize},
     services::password_crypto::spawn_verify,
     state::AppState,
-    view::{MfaTemplate, csrf_error_response, nav, render},
+    view::{MfaTemplate, csrf_error_response, nav, render_with_csrf},
 };
 
 #[derive(Deserialize)]
@@ -364,18 +364,6 @@ fn render_recovery(
         message,
         message_class: "success",
     })
-}
-
-fn render_with_csrf<T, F>(token: CsrfToken, template: F) -> Result<Response, AppError>
-where
-    T: askama::Template,
-    F: FnOnce(String) -> T,
-{
-    let csrf_token = token
-        .authenticity_token()
-        .map_err(|error| AppError::internal(anyhow!("failed to create CSRF token: {error}")))?;
-    let response = render(template(csrf_token))?;
-    Ok((token, response).into_response())
 }
 
 fn audit_mfa_event(action: &str, id_user: i32, username: &str) {
