@@ -246,17 +246,7 @@ mod tests {
 
     #[tokio::test]
     async fn round_trips_create_load_and_delete() {
-        let database_path = std::env::temp_dir().join(format!(
-            "kraken-ui-sessions-{}-{}.sqlite",
-            std::process::id(),
-            OffsetDateTime::now_utc().unix_timestamp_nanos()
-        ));
-        let database = database::connect(&database_path)
-            .await
-            .unwrap_or_else(|error| panic!("test database must connect: {error}"));
-        let store = SeaOrmSessionStore::new(database)
-            .await
-            .unwrap_or_else(|error| panic!("session store must initialise: {error}"));
+        let (store, _directory) = temp_store().await;
 
         let mut record = Record {
             id: Id::default(),
@@ -283,13 +273,11 @@ mod tests {
             .await
             .unwrap_or_else(|error| panic!("load after delete must succeed: {error}"));
         assert!(missing.is_none());
-
-        let _ignored = tokio::fs::remove_file(database_path).await;
     }
 
     #[tokio::test]
     async fn revokes_every_session_for_an_operator() {
-        let store = store_for("revoke").await;
+        let (store, _directory) = temp_store().await;
         let (mut first, mut second, mut other) = (record_for(7), record_for(7), record_for(9));
         for record in [&mut first, &mut second, &mut other] {
             store
@@ -312,7 +300,7 @@ mod tests {
 
     #[tokio::test]
     async fn revokes_every_session_except_the_current_one() {
-        let store = store_for("revoke-except").await;
+        let (store, _directory) = temp_store().await;
         let (mut current, mut stale) = (record_for(7), record_for(7));
         for record in [&mut current, &mut stale] {
             store
@@ -331,18 +319,19 @@ mod tests {
         assert!(load(&store, &stale.id).await.is_none());
     }
 
-    async fn store_for(label: &str) -> SeaOrmSessionStore {
-        let database_path = std::env::temp_dir().join(format!(
-            "kraken-ui-sessions-{label}-{}-{}.sqlite",
-            std::process::id(),
-            OffsetDateTime::now_utc().unix_timestamp_nanos()
-        ));
-        let database = database::connect(&database_path)
+    /// Builds a session store backed by a SQLite database inside a freshly created,
+    /// securely named temporary directory. The returned `TempDir` guard must be
+    /// kept alive for the duration of the test; it removes the directory (database
+    /// and any WAL sidecars) on drop.
+    async fn temp_store() -> (SeaOrmSessionStore, tempfile::TempDir) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let database = database::connect(&directory.path().join("kraken-ui-sessions.sqlite"))
             .await
             .unwrap_or_else(|error| panic!("test database must connect: {error}"));
-        SeaOrmSessionStore::new(database)
+        let store = SeaOrmSessionStore::new(database)
             .await
-            .unwrap_or_else(|error| panic!("session store must initialise: {error}"))
+            .unwrap_or_else(|error| panic!("session store must initialise: {error}"));
+        (store, directory)
     }
 
     async fn load(store: &SeaOrmSessionStore, id: &Id) -> Option<Record> {
@@ -364,17 +353,7 @@ mod tests {
 
     #[tokio::test]
     async fn does_not_load_expired_records() {
-        let database_path = std::env::temp_dir().join(format!(
-            "kraken-ui-sessions-expired-{}-{}.sqlite",
-            std::process::id(),
-            OffsetDateTime::now_utc().unix_timestamp_nanos()
-        ));
-        let database = database::connect(&database_path)
-            .await
-            .unwrap_or_else(|error| panic!("test database must connect: {error}"));
-        let store = SeaOrmSessionStore::new(database)
-            .await
-            .unwrap_or_else(|error| panic!("session store must initialise: {error}"));
+        let (store, _directory) = temp_store().await;
 
         let mut record = Record {
             id: Id::default(),
@@ -391,7 +370,5 @@ mod tests {
             .await
             .unwrap_or_else(|error| panic!("load must succeed: {error}"));
         assert!(loaded.is_none());
-
-        let _ignored = tokio::fs::remove_file(database_path).await;
     }
 }

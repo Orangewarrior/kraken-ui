@@ -145,6 +145,6 @@ Every mutation uses POST and a CSRF token. The JSON endpoints never return
 
 ## The KrakenWAF database
 
-`db_local` points at `vulns_alert.db`. The UI opens this file **read-only** and
+`db-waf-alerts` (deprecated alias `db_local`) points at `vulns_alert.db`. The UI opens this file **read-only** and
 queries `vulnerabilities` with parameterised filters for date, severity, IP,
 country and title — it can read the WAF's findings but never write to them.

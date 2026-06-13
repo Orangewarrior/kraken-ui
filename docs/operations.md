@@ -11,8 +11,8 @@ A practical guide to configuring and running Kraken UI.
 | `cert-ca` | The PEM certificate or chain the server presents. |
 | `key` | The matching PEM private key. |
 | `listen` | The HTTPS address and port to bind. |
-| `db-local` | The UI's own SQLite database. |
-| `db_local` | The KrakenWAF alerts database (opened read-only). |
+| `db-ui` | The UI's own SQLite database (read-write). Deprecated alias: `db-local`. |
+| `db-waf-alerts` | The KrakenWAF alerts database (opened read-only). Deprecated alias: `db_local`. |
 | `waf-endpoint` | The KrakenWAF HTTPS metrics endpoint. |
 | `waf-cert-ca` | The PEM to trust when the WAF presents its own certificate. |
 | `log-dir` | The directory for the JSONL logs. |

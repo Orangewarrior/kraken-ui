@@ -333,7 +333,10 @@ impl OperatorMfaRepository {
                 RECOVERY_DOMAIN,
                 &row.encrypted_code,
             )?;
-            if constant_time_eq(normalize_recovery(&stored).as_bytes(), candidate.as_bytes()) {
+            if crate::security::constant_time_eq(
+                normalize_recovery(&stored).as_bytes(),
+                candidate.as_bytes(),
+            ) {
                 let mut active = row.into_active_model();
                 active.used = Set(1);
                 active.used_at = Set(Some(current_timestamp()));
@@ -369,6 +372,15 @@ impl OperatorMfaRepository {
 /// clock skew on either side so a code entered near a period boundary still works.
 /// Returns the matching time-step (`unix_time / period`) so the caller can record
 /// it and refuse a later replay of the same code; `None` if it does not match.
+///
+/// Steps are tried current-first (`0`, then `-step`, then `+step`), so a code is
+/// attributed to the current window whenever it is valid there. The `+step`
+/// (future) window is only reached when the authenticator's clock runs ahead;
+/// recording that future step is still correct for replay prevention of that
+/// exact code. The only side effect is that, if a future-window code is consumed,
+/// a *different* current-window code presented moments later is rejected until the
+/// clock advances — a deliberate, sub-period trade-off that favours strict replay
+/// prevention over accepting a second code inside the same skew window.
 fn verify_totp_code(secret_base32: &str, code: &str) -> Option<u64> {
     let trimmed = code.trim();
     if trimmed.len() != 6 || !trimmed.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -378,7 +390,7 @@ fn verify_totp_code(secret_base32: &str, code: &str) -> Option<u64> {
     let totp = otpauth::TOTP::from_base32(secret_base32.to_owned())?;
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let step = TOTP_PERIOD as i64;
-    [-step, 0, step].into_iter().find_map(|delta| {
+    [0, -step, step].into_iter().find_map(|delta| {
         let timestamp = now + delta;
         if timestamp >= 0 && totp.verify(code_num, TOTP_PERIOD, timestamp as u64) {
             Some(timestamp as u64 / TOTP_PERIOD)
@@ -409,17 +421,6 @@ fn normalize_recovery(input: &str) -> String {
         .filter(char::is_ascii_alphanumeric)
         .map(|character| character.to_ascii_uppercase())
         .collect()
-}
-
-fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-    let mut difference = 0_u8;
-    for (a, b) in left.iter().zip(right.iter()) {
-        difference |= a ^ b;
-    }
-    difference == 0
 }
 
 #[cfg(test)]
@@ -479,13 +480,12 @@ mod tests {
         }
     }
 
-    async fn fixture() -> (sea_orm::DatabaseConnection, std::path::PathBuf, i32) {
-        let database_path = std::env::temp_dir().join(format!(
-            "kraken-ui-mfa-{}-{}.sqlite",
-            std::process::id(),
-            time::OffsetDateTime::now_utc().unix_timestamp_nanos()
-        ));
-        let database = database::connect(&database_path)
+    /// Connects a database inside a securely named temporary directory and seeds
+    /// one admin operator. The returned `TempDir` guard must outlive the database;
+    /// it removes the directory (and any SQLite WAL sidecars) on drop.
+    async fn fixture() -> (sea_orm::DatabaseConnection, tempfile::TempDir, i32) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let database = database::connect(&directory.path().join("kraken-ui-mfa.sqlite"))
             .await
             .unwrap_or_else(|error| panic!("test database must connect: {error}"));
         let operators = OperatorRepository::new(database.clone(), Arc::new(TestCrypto));
@@ -498,7 +498,7 @@ mod tests {
             })
             .await
             .unwrap_or_else(|error| panic!("operator must be created: {error}"));
-        (database, database_path, created.id_user)
+        (database, directory, created.id_user)
     }
 
     fn current_code(secret_base32: &str) -> String {
@@ -528,7 +528,7 @@ mod tests {
 
     #[tokio::test]
     async fn enrolls_confirms_and_mints_recovery_codes() {
-        let (database, path, id_user) = fixture().await;
+        let (database, _directory, id_user) = fixture().await;
         let mfa = OperatorMfaRepository::new(database.clone(), Arc::new(TestCrypto));
 
         assert!(!mfa.status(id_user).await.unwrap().enabled);
@@ -555,13 +555,11 @@ mod tests {
         assert_eq!(recovery_codes.len(), RECOVERY_CODE_COUNT);
         assert!(mfa.status(id_user).await.unwrap().enabled);
         assert_eq!(operator_flag(&database, id_user).await, 1);
-
-        let _ = tokio::fs::remove_file(path).await;
     }
 
     #[tokio::test]
     async fn verifies_totp_and_burns_recovery_codes() {
-        let (database, path, id_user) = fixture().await;
+        let (database, _directory, id_user) = fixture().await;
         let mfa = OperatorMfaRepository::new(database.clone(), Arc::new(TestCrypto));
         let enrollment = mfa.begin_enrollment(id_user, "admin").await.unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp() as u64;
@@ -601,13 +599,11 @@ mod tests {
             status.remaining_recovery_codes,
             (RECOVERY_CODE_COUNT - 2) as u64
         );
-
-        let _ = tokio::fs::remove_file(path).await;
     }
 
     #[tokio::test]
     async fn disable_removes_secret_and_codes() {
-        let (database, path, id_user) = fixture().await;
+        let (database, _directory, id_user) = fixture().await;
         let mfa = OperatorMfaRepository::new(database.clone(), Arc::new(TestCrypto));
         let enrollment = mfa.begin_enrollment(id_user, "admin").await.unwrap();
         mfa.confirm(id_user, &current_code(&enrollment.secret_base32))
@@ -621,7 +617,5 @@ mod tests {
         assert_eq!(operator_flag(&database, id_user).await, 0);
         // No recovery code authenticates once two-factor is off.
         assert!(!mfa.verify_login_code(id_user, "AAAAA-AAAAA").await.unwrap());
-
-        let _ = tokio::fs::remove_file(path).await;
     }
 }

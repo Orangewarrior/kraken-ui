@@ -2,7 +2,7 @@
 
 > The secure-by-default admin console for [KrakenWAF](https://github.com/Orangewarrior/KrakenWaf) — built in Rust.
 
-**Current version: 0.14.0**
+**Current version: 0.15.0**
 
 Kraken UI is a small, hardened web application for operating a KrakenWAF
 deployment: manage operators, watch blocked attacks in real time, and read live
@@ -60,13 +60,18 @@ address, the UI's own database and the KrakenWAF alerts database:
 cert-ca: certs/ca.pem
 key: certs/key.pem
 listen: "127.0.0.1:3443"
-db-local: db/kraken-ui.sqlite
-db_local: "../KrakenWAF/logs/db/vulns_alert.db"
+db-ui: db/kraken-ui.sqlite
+db-waf-alerts: "../KrakenWAF/logs/db/vulns_alert.db"
 waf-endpoint: "https://127.0.0.1:4343"
 waf-cert-ca: "../KrakenWAF/certs/cert.pem"
 log-dir: log
 session-timeout-minutes: 30
 ```
+
+> `db-ui` is the UI's own read-write database; `db-waf-alerts` is the KrakenWAF
+> alerts database, opened read-only. The earlier `db-local` / `db_local` keys are
+> still accepted as deprecated aliases, but prefer the explicit names — a single
+> underscore once separated the credential store from the read-only alerts file.
 
 **2. Review `conf/ratelimit.yaml`.** The defaults enable local
 `axum-governor` GCRA plus persistent SQLite state at
@@ -125,14 +130,19 @@ encrypted at rest and never written to a log.
 
 Prefer not to put the password in the environment? With an empty operators
 table you can bootstrap once from localhost. The endpoint returns `410 Gone`
-as soon as any operator exists:
+as soon as any operator exists.
+
+A release build **requires** a bootstrap token, so set one and send it with the
+request (debug builds keep it optional):
 
 ```bash
+export KRAKEN_UI_FIRST_TIME_TOKEN="$(openssl rand -hex 32)"
 curl --cacert certs/ca.pem \
   --data-urlencode 'username=admin' \
   --data-urlencode 'email=admin@example.invalid' \
   --data-urlencode 'user_type=admin' \
   --data-urlencode 'password=Use-A-Unique!Strong9Password' \
+  --data-urlencode "token=$KRAKEN_UI_FIRST_TIME_TOKEN" \
   https://127.0.0.1:3443/kraken_ui/auth/first_time
 ```
 

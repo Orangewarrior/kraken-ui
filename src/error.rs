@@ -18,22 +18,6 @@ impl AppError {
             source: source.into(),
         }
     }
-
-    pub fn unauthorized(source: impl Into<anyhow::Error>) -> Self {
-        Self {
-            status: StatusCode::UNAUTHORIZED,
-            public_message: "Invalid credentials",
-            source: source.into(),
-        }
-    }
-
-    pub fn bad_request(source: impl Into<anyhow::Error>) -> Self {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            public_message: "Invalid request data",
-            source: source.into(),
-        }
-    }
 }
 
 impl IntoResponse for AppError {

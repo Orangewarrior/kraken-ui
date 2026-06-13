@@ -25,7 +25,7 @@ use crate::{
     state::AppState,
     view::{
         AddUserTemplate, DeleteUserTemplate, EditUserTemplate, RoleOption, ShowUserTableTemplate,
-        UpdatePasswordTemplate, csrf_error_response, nav, render,
+        UpdatePasswordTemplate, csrf_error_response, nav, render_with_csrf,
     },
 };
 
@@ -643,18 +643,6 @@ fn render_password(
         message,
         message_class,
     })
-}
-
-fn render_with_csrf<T, F>(token: CsrfToken, template: F) -> Result<Response, AppError>
-where
-    T: askama::Template,
-    F: FnOnce(String) -> T,
-{
-    let csrf_token = token
-        .authenticity_token()
-        .map_err(|error| AppError::internal(anyhow!("failed to create CSRF token: {error}")))?;
-    let response = render(template(csrf_token))?;
-    Ok((token, response).into_response())
 }
 
 fn role_options(selected: Option<&str>) -> Vec<RoleOption> {

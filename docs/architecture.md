@@ -49,10 +49,11 @@ socket, a sidecar service, an HSM or a KMS without changing the HTTP flow.
 expression API, which produces bound parameters instead of concatenating user
 input into a query string.
 
-**Two databases, two postures.** The UI's own database (`db-local`) is opened
-read-write. The KrakenWAF alerts database (`db_local`) is opened through a
+**Two databases, two postures.** The UI's own database (`db-ui`) is opened
+read-write. The KrakenWAF alerts database (`db-waf-alerts`) is opened through a
 second SeaORM connection in **read-only** mode, so the console can never modify
-the WAF's data.
+the WAF's data. The two keys are validated to point at different files. (The
+earlier `db-local` / `db_local` names remain accepted as deprecated aliases.)
 
 **Metrics are pulled over HTTPS, with the channel pinned.** `WafMetricsService`
 uses the configured certificate to query `waf-endpoint/metrics` on KrakenWAF's

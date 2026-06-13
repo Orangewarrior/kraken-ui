@@ -36,7 +36,7 @@ use crate::{
         source_update::SourceUpdateService,
         waf_metrics::WafMetricsService,
     },
-    state::AppState,
+    state::{AppState, RateLimiting},
 };
 
 pub struct AppFactory {
@@ -99,7 +99,7 @@ impl AppFactory {
                 None
             }
             None => {
-                warn!("db_local is not configured; attack views will be empty");
+                warn!("db-waf-alerts is not configured; attack views will be empty");
                 None
             }
         };
@@ -150,13 +150,15 @@ impl AppFactory {
             password_crypto,
             waf_metrics,
             session_store: session_store.clone(),
-            login_throttle: Arc::new(LoginThrottle::with_defaults()),
-            persistent_rate_limiter,
-            ip_concurrency_limiter: Arc::new(rate_limit::IpConcurrencyLimiter::new(
-                rate_limit_config.max_coroutines_per_ip,
-            )),
-            request_timeout: rate_limit_config.connection_timeout(),
-            account_failure_monitor: Arc::new(AccountFailureMonitor::with_defaults()),
+            rate_limiting: RateLimiting {
+                login_throttle: Arc::new(LoginThrottle::with_defaults()),
+                account_failure_monitor: Arc::new(AccountFailureMonitor::with_defaults()),
+                persistent: persistent_rate_limiter,
+                ip_concurrency: Arc::new(rate_limit::IpConcurrencyLimiter::new(
+                    rate_limit_config.max_coroutines_per_ip,
+                )),
+                request_timeout: rate_limit_config.connection_timeout(),
+            },
             first_time_lock: Arc::new(tokio::sync::Mutex::new(())),
             source_update,
         };
@@ -348,9 +350,46 @@ mod tests {
         config::AppConfig,
         services::{
             password_crypto::{PasswordCryptoService, PasswordVerification},
+            rate_limit::{BackendKind, RateLimitConfig, RedisConfig, SqliteConfig},
             waf_metrics::WafMetricsService,
         },
     };
+
+    /// A rate-limit configuration with the global limiter disabled. These tests
+    /// cover security headers and the MFA redirect, not throttling, so disabling
+    /// it keeps each test from opening the shared on-disk
+    /// `db/kraken-ui-ratelimit.sqlite`, which races ("database is locked") when the
+    /// tests build their applications in parallel.
+    fn disabled_rate_limit() -> RateLimitConfig {
+        RateLimitConfig {
+            enabled: false,
+            requests_per_second: 5,
+            burst_size: 5,
+            max_coroutines_per_ip: 32,
+            tls_handshake_timeout_secs: 10,
+            connection_timeout_secs: 30,
+            max_tracked_ips: 1000,
+            backend: BackendKind::Sqlite,
+            fail_open: false,
+            sqlite: SqliteConfig {
+                // Never opened while `enabled` is false; a relative placeholder
+                // avoids referencing the shared temporary directory.
+                path: std::path::PathBuf::from("unused-ratelimit.sqlite"),
+                busy_timeout_ms: 1000,
+                cleanup_interval_requests: 1000,
+            },
+            redis: RedisConfig {
+                host: "127.0.0.1".to_owned(),
+                port: 6379,
+                database: 0,
+                tls: true,
+                key_prefix: "kraken-ui:test:".to_owned(),
+                connect_timeout_secs: 1,
+                response_timeout_secs: 1,
+                retries: 0,
+            },
+        }
+    }
 
     struct TestPasswordCrypto;
 
@@ -389,21 +428,21 @@ mod tests {
 
     #[tokio::test]
     async fn applies_configured_security_headers_to_public_responses() {
-        let database_path =
-            std::env::temp_dir().join(format!("kraken-ui-test-{}.sqlite", std::process::id()));
+        let directory = tempfile::tempdir().expect("temporary directory");
         let config = AppConfig {
             certificate_path: "unused-cert.pem".into(),
             private_key_path: "unused-key.pem".into(),
             listen: "127.0.0.1:3443".to_owned(),
-            database_path: database_path.clone(),
+            database_path: directory.path().join("kraken-ui.sqlite"),
             waf_database_path: None,
             waf_endpoint: "https://127.0.0.1:4343".to_owned(),
             waf_certificate_path: None,
-            log_directory: std::env::temp_dir(),
+            log_directory: directory.path().to_path_buf(),
             session_timeout_minutes: 30,
         };
         let application = AppFactory::new(config)
             .with_password_crypto(Arc::new(TestPasswordCrypto))
+            .with_rate_limit_config(disabled_rate_limit())
             .with_waf_metrics(
                 WafMetricsService::without_custom_ca("https://127.0.0.1:4343")
                     .unwrap_or_else(|error| panic!("test metrics client must build: {error}")),
@@ -435,33 +474,25 @@ mod tests {
         );
         assert!(response.headers().contains_key("content-security-policy"));
         assert!(response.headers().contains_key("strict-transport-security"));
-
-        let _ignored = tokio::fs::remove_file(database_path).await;
     }
 
     #[tokio::test]
     async fn mfa_challenge_redirects_without_a_pending_session() {
-        let database_path = std::env::temp_dir().join(format!(
-            "kraken-ui-mfa-challenge-{}-{}.sqlite",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|elapsed| elapsed.as_nanos())
-                .unwrap_or_default()
-        ));
+        let directory = tempfile::tempdir().expect("temporary directory");
         let config = AppConfig {
             certificate_path: "unused-cert.pem".into(),
             private_key_path: "unused-key.pem".into(),
             listen: "127.0.0.1:3443".to_owned(),
-            database_path: database_path.clone(),
+            database_path: directory.path().join("kraken-ui.sqlite"),
             waf_database_path: None,
             waf_endpoint: "https://127.0.0.1:4343".to_owned(),
             waf_certificate_path: None,
-            log_directory: std::env::temp_dir(),
+            log_directory: directory.path().to_path_buf(),
             session_timeout_minutes: 30,
         };
         let application = AppFactory::new(config)
             .with_password_crypto(Arc::new(TestPasswordCrypto))
+            .with_rate_limit_config(disabled_rate_limit())
             .with_waf_metrics(
                 WafMetricsService::without_custom_ca("https://127.0.0.1:4343")
                     .unwrap_or_else(|error| panic!("test metrics client must build: {error}")),
@@ -493,7 +524,5 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("/kraken_ui/login")
         );
-
-        let _ignored = tokio::fs::remove_file(database_path).await;
     }
 }
