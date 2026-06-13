@@ -13,6 +13,9 @@ All notable changes to this project are recorded in this file.
   failing — for the platform-managed `/run/secrets/krakenwaf` mount.
 - Validate the `listen` socket address at configuration load time so a malformed
   value is rejected at startup.
+- Stop using the shared system temporary directory with predictable names in the
+  test suite (Semgrep `rust.lang.security.temp-dir.temp-dir`); each test now uses
+  a uniquely named `tempfile` directory that is removed on drop.
 
 ### Changed
 

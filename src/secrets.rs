@@ -126,17 +126,9 @@ mod tests {
 
     #[test]
     fn explicit_file_wins_and_is_trimmed() {
-        let directory = std::env::temp_dir().join(format!(
-            "kraken-ui-secret-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|elapsed| elapsed.as_nanos())
-                .unwrap_or_default()
-        ));
-        std::fs::create_dir_all(&directory).expect("create test directory");
-        let explicit = directory.join("explicit");
-        let conventional = directory.join("conventional");
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let explicit = directory.path().join("explicit");
+        let conventional = directory.path().join("conventional");
         std::fs::write(&explicit, " explicit-token \n").expect("write explicit secret");
         std::fs::write(&conventional, "conventional-token").expect("write conventional secret");
         restrict_permissions(&explicit);
@@ -144,14 +136,13 @@ mod tests {
         let value =
             load_secret_from_sources(Some(&explicit), &conventional, Some("environment-token"));
 
-        std::fs::remove_dir_all(directory).expect("remove test directory");
         assert_eq!(value.as_deref(), Some("explicit-token"));
     }
 
     #[test]
     fn empty_files_fall_back_to_environment() {
-        let missing =
-            std::env::temp_dir().join(format!("kraken-ui-missing-secret-{}", std::process::id()));
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let missing = directory.path().join("missing-secret");
 
         let value = load_secret_from_sources(Some(&missing), &missing, Some(" environment-token "));
 
@@ -166,23 +157,14 @@ mod tests {
     fn loose_explicit_file_is_refused_without_fallback() {
         use std::os::unix::fs::PermissionsExt;
 
-        let directory = std::env::temp_dir().join(format!(
-            "kraken-ui-loose-secret-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|elapsed| elapsed.as_nanos())
-                .unwrap_or_default()
-        ));
-        std::fs::create_dir_all(&directory).expect("create test directory");
-        let explicit = directory.join("explicit");
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let explicit = directory.path().join("explicit");
         std::fs::write(&explicit, "explicit-token").expect("write explicit secret");
         std::fs::set_permissions(&explicit, std::fs::Permissions::from_mode(0o644))
             .expect("loosen permissions");
 
         let value = load_secret_from_sources(Some(&explicit), &explicit, Some("environment-token"));
 
-        std::fs::remove_dir_all(directory).expect("remove test directory");
         assert_eq!(value, None);
     }
 }

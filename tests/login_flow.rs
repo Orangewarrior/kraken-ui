@@ -125,24 +125,19 @@ fn location(response: &Response) -> Option<String> {
 
 #[tokio::test]
 async fn login_dashboard_logout_round_trip() {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_nanos())
-        .unwrap_or_default();
-    let database_path = std::env::temp_dir().join(format!(
-        "kraken-ui-login-flow-{}-{unique}.sqlite",
-        std::process::id()
-    ));
+    // A securely named temporary directory holds the UI database and logs; its
+    // TempDir guard removes everything (including SQLite WAL sidecars) on drop.
+    let directory = tempfile::tempdir().expect("temporary directory");
 
     let config = AppConfig {
         certificate_path: "unused-cert.pem".into(),
         private_key_path: "unused-key.pem".into(),
         listen: "127.0.0.1:3443".to_owned(),
-        database_path: database_path.clone(),
+        database_path: directory.path().join("kraken-ui.sqlite"),
         waf_database_path: None,
         waf_endpoint: "https://127.0.0.1:4343".to_owned(),
         waf_certificate_path: None,
-        log_directory: std::env::temp_dir(),
+        log_directory: directory.path().to_path_buf(),
         session_timeout_minutes: 30,
     };
 
@@ -276,6 +271,4 @@ async fn login_dashboard_logout_round_trip() {
         .expect("post-logout response");
     assert!(response.status().is_redirection());
     assert_eq!(location(&response).as_deref(), Some("/kraken_ui/login"));
-
-    let _ = tokio::fs::remove_file(database_path).await;
 }

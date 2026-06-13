@@ -480,13 +480,12 @@ mod tests {
         }
     }
 
-    async fn fixture() -> (sea_orm::DatabaseConnection, std::path::PathBuf, i32) {
-        let database_path = std::env::temp_dir().join(format!(
-            "kraken-ui-mfa-{}-{}.sqlite",
-            std::process::id(),
-            time::OffsetDateTime::now_utc().unix_timestamp_nanos()
-        ));
-        let database = database::connect(&database_path)
+    /// Connects a database inside a securely named temporary directory and seeds
+    /// one admin operator. The returned `TempDir` guard must outlive the database;
+    /// it removes the directory (and any SQLite WAL sidecars) on drop.
+    async fn fixture() -> (sea_orm::DatabaseConnection, tempfile::TempDir, i32) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let database = database::connect(&directory.path().join("kraken-ui-mfa.sqlite"))
             .await
             .unwrap_or_else(|error| panic!("test database must connect: {error}"));
         let operators = OperatorRepository::new(database.clone(), Arc::new(TestCrypto));
@@ -499,7 +498,7 @@ mod tests {
             })
             .await
             .unwrap_or_else(|error| panic!("operator must be created: {error}"));
-        (database, database_path, created.id_user)
+        (database, directory, created.id_user)
     }
 
     fn current_code(secret_base32: &str) -> String {
@@ -529,7 +528,7 @@ mod tests {
 
     #[tokio::test]
     async fn enrolls_confirms_and_mints_recovery_codes() {
-        let (database, path, id_user) = fixture().await;
+        let (database, _directory, id_user) = fixture().await;
         let mfa = OperatorMfaRepository::new(database.clone(), Arc::new(TestCrypto));
 
         assert!(!mfa.status(id_user).await.unwrap().enabled);
@@ -556,13 +555,11 @@ mod tests {
         assert_eq!(recovery_codes.len(), RECOVERY_CODE_COUNT);
         assert!(mfa.status(id_user).await.unwrap().enabled);
         assert_eq!(operator_flag(&database, id_user).await, 1);
-
-        let _ = tokio::fs::remove_file(path).await;
     }
 
     #[tokio::test]
     async fn verifies_totp_and_burns_recovery_codes() {
-        let (database, path, id_user) = fixture().await;
+        let (database, _directory, id_user) = fixture().await;
         let mfa = OperatorMfaRepository::new(database.clone(), Arc::new(TestCrypto));
         let enrollment = mfa.begin_enrollment(id_user, "admin").await.unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp() as u64;
@@ -602,13 +599,11 @@ mod tests {
             status.remaining_recovery_codes,
             (RECOVERY_CODE_COUNT - 2) as u64
         );
-
-        let _ = tokio::fs::remove_file(path).await;
     }
 
     #[tokio::test]
     async fn disable_removes_secret_and_codes() {
-        let (database, path, id_user) = fixture().await;
+        let (database, _directory, id_user) = fixture().await;
         let mfa = OperatorMfaRepository::new(database.clone(), Arc::new(TestCrypto));
         let enrollment = mfa.begin_enrollment(id_user, "admin").await.unwrap();
         mfa.confirm(id_user, &current_code(&enrollment.secret_base32))
@@ -622,7 +617,5 @@ mod tests {
         assert_eq!(operator_flag(&database, id_user).await, 0);
         // No recovery code authenticates once two-factor is off.
         assert!(!mfa.verify_login_code(id_user, "AAAAA-AAAAA").await.unwrap());
-
-        let _ = tokio::fs::remove_file(path).await;
     }
 }

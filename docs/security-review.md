@@ -204,6 +204,12 @@ expensive work from request hot paths:
   and the ±1 skew window is documented.
 - **End-to-end auth test.** A new integration test drives the full login → CSRF →
   session → protected page → logout round trip over the assembled router.
+- **Secure temporary files in tests.** The test suite no longer builds predictable
+  paths under the shared system temporary directory (the Semgrep
+  `temp-dir` finding); it uses uniquely named `tempfile` directories that are
+  removed on drop, which also cleans up SQLite WAL sidecars.
+- **CI toolchain.** `rust-toolchain.toml` now declares the `rustfmt` and `clippy`
+  components, so the pinned toolchain carries them in CI and locally.
 - **Dead code removed.** Unused `AppError` constructors and `AppConfig::session_timeout`
   were deleted; the `listen` address is now validated at load time; and the
   duplicated constant-time comparison and CSRF render helpers were unified.

@@ -295,12 +295,8 @@ mod tests {
 
     #[tokio::test]
     async fn creates_updates_lists_and_deletes_operator() {
-        let database_path = std::env::temp_dir().join(format!(
-            "kraken-ui-operators-{}-{}.sqlite",
-            std::process::id(),
-            time::OffsetDateTime::now_utc().unix_timestamp_nanos()
-        ));
-        let database = database::connect(&database_path)
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let database = database::connect(&directory.path().join("kraken-ui-operators.sqlite"))
             .await
             .unwrap_or_else(|error| panic!("test database must connect: {error}"));
         let repository = OperatorRepository::new(database, Arc::new(TestPasswordCrypto));
@@ -342,6 +338,5 @@ mod tests {
             .await
             .unwrap_or_else(|error| panic!("operator must be deleted: {error}"));
         assert_eq!(rows, 1);
-        let _ignored = tokio::fs::remove_file(database_path).await;
     }
 }

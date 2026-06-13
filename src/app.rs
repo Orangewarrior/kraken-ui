@@ -372,7 +372,9 @@ mod tests {
             backend: BackendKind::Sqlite,
             fail_open: false,
             sqlite: SqliteConfig {
-                path: std::env::temp_dir().join("kraken-ui-unused-ratelimit.sqlite"),
+                // Never opened while `enabled` is false; a relative placeholder
+                // avoids referencing the shared temporary directory.
+                path: std::path::PathBuf::from("unused-ratelimit.sqlite"),
                 busy_timeout_ms: 1000,
                 cleanup_interval_requests: 1000,
             },
@@ -426,17 +428,16 @@ mod tests {
 
     #[tokio::test]
     async fn applies_configured_security_headers_to_public_responses() {
-        let database_path =
-            std::env::temp_dir().join(format!("kraken-ui-test-{}.sqlite", std::process::id()));
+        let directory = tempfile::tempdir().expect("temporary directory");
         let config = AppConfig {
             certificate_path: "unused-cert.pem".into(),
             private_key_path: "unused-key.pem".into(),
             listen: "127.0.0.1:3443".to_owned(),
-            database_path: database_path.clone(),
+            database_path: directory.path().join("kraken-ui.sqlite"),
             waf_database_path: None,
             waf_endpoint: "https://127.0.0.1:4343".to_owned(),
             waf_certificate_path: None,
-            log_directory: std::env::temp_dir(),
+            log_directory: directory.path().to_path_buf(),
             session_timeout_minutes: 30,
         };
         let application = AppFactory::new(config)
@@ -473,29 +474,20 @@ mod tests {
         );
         assert!(response.headers().contains_key("content-security-policy"));
         assert!(response.headers().contains_key("strict-transport-security"));
-
-        let _ignored = tokio::fs::remove_file(database_path).await;
     }
 
     #[tokio::test]
     async fn mfa_challenge_redirects_without_a_pending_session() {
-        let database_path = std::env::temp_dir().join(format!(
-            "kraken-ui-mfa-challenge-{}-{}.sqlite",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|elapsed| elapsed.as_nanos())
-                .unwrap_or_default()
-        ));
+        let directory = tempfile::tempdir().expect("temporary directory");
         let config = AppConfig {
             certificate_path: "unused-cert.pem".into(),
             private_key_path: "unused-key.pem".into(),
             listen: "127.0.0.1:3443".to_owned(),
-            database_path: database_path.clone(),
+            database_path: directory.path().join("kraken-ui.sqlite"),
             waf_database_path: None,
             waf_endpoint: "https://127.0.0.1:4343".to_owned(),
             waf_certificate_path: None,
-            log_directory: std::env::temp_dir(),
+            log_directory: directory.path().to_path_buf(),
             session_timeout_minutes: 30,
         };
         let application = AppFactory::new(config)
@@ -532,7 +524,5 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("/kraken_ui/login")
         );
-
-        let _ignored = tokio::fs::remove_file(database_path).await;
     }
 }
