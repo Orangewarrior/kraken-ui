@@ -350,9 +350,44 @@ mod tests {
         config::AppConfig,
         services::{
             password_crypto::{PasswordCryptoService, PasswordVerification},
+            rate_limit::{BackendKind, RateLimitConfig, RedisConfig, SqliteConfig},
             waf_metrics::WafMetricsService,
         },
     };
+
+    /// A rate-limit configuration with the global limiter disabled. These tests
+    /// cover security headers and the MFA redirect, not throttling, so disabling
+    /// it keeps each test from opening the shared on-disk
+    /// `db/kraken-ui-ratelimit.sqlite`, which races ("database is locked") when the
+    /// tests build their applications in parallel.
+    fn disabled_rate_limit() -> RateLimitConfig {
+        RateLimitConfig {
+            enabled: false,
+            requests_per_second: 5,
+            burst_size: 5,
+            max_coroutines_per_ip: 32,
+            tls_handshake_timeout_secs: 10,
+            connection_timeout_secs: 30,
+            max_tracked_ips: 1000,
+            backend: BackendKind::Sqlite,
+            fail_open: false,
+            sqlite: SqliteConfig {
+                path: std::env::temp_dir().join("kraken-ui-unused-ratelimit.sqlite"),
+                busy_timeout_ms: 1000,
+                cleanup_interval_requests: 1000,
+            },
+            redis: RedisConfig {
+                host: "127.0.0.1".to_owned(),
+                port: 6379,
+                database: 0,
+                tls: true,
+                key_prefix: "kraken-ui:test:".to_owned(),
+                connect_timeout_secs: 1,
+                response_timeout_secs: 1,
+                retries: 0,
+            },
+        }
+    }
 
     struct TestPasswordCrypto;
 
@@ -406,6 +441,7 @@ mod tests {
         };
         let application = AppFactory::new(config)
             .with_password_crypto(Arc::new(TestPasswordCrypto))
+            .with_rate_limit_config(disabled_rate_limit())
             .with_waf_metrics(
                 WafMetricsService::without_custom_ca("https://127.0.0.1:4343")
                     .unwrap_or_else(|error| panic!("test metrics client must build: {error}")),
@@ -464,6 +500,7 @@ mod tests {
         };
         let application = AppFactory::new(config)
             .with_password_crypto(Arc::new(TestPasswordCrypto))
+            .with_rate_limit_config(disabled_rate_limit())
             .with_waf_metrics(
                 WafMetricsService::without_custom_ca("https://127.0.0.1:4343")
                     .unwrap_or_else(|error| panic!("test metrics client must build: {error}")),
