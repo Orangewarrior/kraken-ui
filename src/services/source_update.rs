@@ -94,8 +94,11 @@ impl SourceUpdateService {
                 source_root.display()
             )
         })?;
+        // Resolving our own path to re-exec the freshly built binary. This is not
+        // a trust decision about an external caller, so the semgrep current_exe
+        // advisory (aimed at security checks) does not apply here.
         let executable =
-            std::env::current_exe().context("failed to resolve the running executable")?;
+            std::env::current_exe().context("failed to resolve the running executable")?; // nosemgrep
         let client = Client::builder()
             .https_only(true)
             .redirect(reqwest::redirect::Policy::limited(5))
@@ -574,7 +577,10 @@ fn activate_executable(executable: &Path) -> anyhow::Result<()> {
 fn spawn_replacement(executable: &Path, source_root: &Path) -> anyhow::Result<()> {
     let mut command = std::process::Command::new(executable);
     command
-        .args(std::env::args_os().skip(1))
+        // Forwarding our own argv to the replacement process we spawn; the values
+        // are not used as a security check, so the semgrep args_os advisory does
+        // not apply.
+        .args(std::env::args_os().skip(1)) // nosemgrep
         .current_dir(source_root)
         .env("KRAKEN_UI_RESTART_DELAY_MS", "2000")
         .stdin(Stdio::null())

@@ -32,7 +32,9 @@ const SECRET_BYTES: usize = 64;
 
 fn main() -> ExitCode {
     let mut destination: Option<PathBuf> = None;
-    let mut args = std::env::args().skip(1);
+    // Plain CLI flag parsing; argv drives no security decision, so the semgrep
+    // args advisory does not apply.
+    let mut args = std::env::args().skip(1); // nosemgrep
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--write" => destination = Some(PathBuf::from(DEFAULT_SECRETS_DIR)),
