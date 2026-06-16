@@ -2,6 +2,44 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.17.0 - 2026-06-16
+
+### Security
+
+- **Secret redaction on the single-attack detail view.** The captured
+  request/response evidence shown by `/kraken_ui/auth/view_waf_request/` (the
+  request URI, the full-path evidence and the matched payload) often carries
+  credentials. From now on **only an administrator** sees those bytes in clear:
+  for an operator or auditor, the value of any parameter whose name matches a
+  well-known secret word — in many languages (`password`, `passe`, `token`,
+  `jeton`, `bearer`, `senha`, `clave`, `пароль`, `密码`, `パスワード`, `kunci`, …)
+  — is replaced with `+++++` before the page is rendered. The decision is made
+  server-side from the session's operator type, so the masked bytes never leave
+  the server for a non-admin. Non-sensitive parameters and describing metadata
+  (title, CWE, rule match, …) are unchanged.
+- New `security::redact` module with the authoritative `SENSITIVE_WORDS` list and
+  a structure-preserving redactor that handles form-urlencoded, JSON and quoted
+  values, compound and localized parameter names, and parameters nested inside a
+  value, while leaving empty values empty.
+
+### Tests
+
+- Unit tests for the redactor (`src/security/redact.rs`): form-urlencoded, JSON
+  and spaced keys, several languages, compound names, nested values, empty
+  values, idempotency and the case-insensitive name classifier.
+- A new isolated, real-HTTP integration test
+  (`tests/view_waf_request_redaction_http.rs`) drives the full router over a real
+  read-only WAF SQLite seeded with a credential-bearing finding: it signs in as
+  `admin` (sees the values) and as `operator` (sees `+++++`, while non-sensitive
+  parameters survive).
+- A standalone probe (`examples/view_waf_request_probe.rs`) that signs in to a
+  running instance and reports whether the detail view masks values for a role.
+
+### Documentation
+
+- New [docs/sensitive-data-redaction.md](docs/sensitive-data-redaction.md), and
+  updated README (roles table and the single-attack detail view section).
+
 ## 0.16.0 - 2026-06-16
 
 ### Added

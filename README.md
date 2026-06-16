@@ -2,7 +2,7 @@
 
 > The secure-by-default admin console for [KrakenWAF](https://github.com/Orangewarrior/KrakenWaf) — built in Rust.
 
-**Current version: 0.16.0**
+**Current version: 0.17.0**
 
 Kraken UI is a small, hardened web application for operating a KrakenWAF
 deployment: manage operators, watch blocked attacks in real time, and read live
@@ -170,9 +170,9 @@ Then sign in at `https://host:port/kraken_ui/login`.
 
 | Role | Can sign in | Sees |
 |------|-------------|------|
-| `admin`    | yes | Everything: dashboard, attacks, the single-attack detail view, the full ACL menu and self-service password change. |
-| `operator` | yes | The same dashboard, attacks table, attack detail view, **Rule management** and password change as an admin — but **without** the ACL menu. |
-| `auditor`  | not yet | Reserved. Already authorised for the read-only attack detail view; sign-in is not implemented. |
+| `admin`    | yes | Everything: dashboard, attacks, the single-attack detail view (**including secret parameter values in clear**), the full ACL menu and self-service password change. |
+| `operator` | yes | The same dashboard, attacks table, attack detail view, **Rule management** and password change as an admin — but **without** the ACL menu, and with **secret parameter values masked** on the attack detail view. |
+| `auditor`  | not yet | Reserved. Already authorised for the read-only attack detail view (with **secret parameter values masked**); sign-in is not implemented. |
 
 The sidebar is defined once in `src/view/templates/admin_sidebar.html`; the ACL
 section is rendered only when the controller passes `show_acl = true` (admins).
@@ -187,6 +187,13 @@ light-themed, syntax-highlighted code box. The payload is rendered through the
 template's default HTML escaping — never Ammonia-stripped, so the exact attacker
 bytes are preserved — and highlighted client-side by building DOM nodes only (no
 `innerHTML`), so it stays inert within the strict CSP.
+
+The captured request/response evidence — the URI, the full-path evidence and the
+matched payload — often carries credentials (`password=…`, `token=…`, `senha=…`).
+Only an **administrator** sees those bytes in clear: for an operator or auditor,
+the value of any parameter named after a well-known secret (in many languages) is
+replaced with `+++++` before the page is rendered. See
+[docs/sensitive-data-redaction.md](docs/sensitive-data-redaction.md).
 
 ## Screenshots
 
@@ -239,6 +246,8 @@ For the bigger picture, see the [`docs/`](docs/) directory:
 - [Source updates](docs/source-updates.md) — admin-only stable release updates,
   preserved files, build requirements and recovery.
 - [Security](docs/security.md) — the controls and why they exist.
+- [Sensitive-data redaction](docs/sensitive-data-redaction.md) — how secret
+  parameter values are masked from non-administrators on the attack detail view.
 - [Security review](docs/security-review.md) — standing findings and their status.
 - [Database & ACL](docs/database.md) — schema, sessions and routes.
 - [Two-factor authentication](docs/mfa.md) — TOTP enrolment, sign-in and recovery.

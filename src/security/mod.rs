@@ -2,6 +2,7 @@ pub mod csrf;
 pub mod headers;
 pub mod password;
 pub mod rate_limit;
+pub mod redact;
 pub mod sanitize;
 
 use std::{fs, path::Path};

@@ -22,7 +22,7 @@ use crate::{
     },
     error::AppError,
     models::vulnerability_repository::{AttackSearchField, AttackSort, VulnerabilityRepository},
-    security::sanitize,
+    security::{redact, sanitize},
     state::AppState,
     view::{ShowAttacksTemplate, ViewWafRequestTemplate, nav, render},
 };
@@ -59,10 +59,18 @@ pub async fn show_attacks(
 /// Renders the standalone detail page for a single WAF finding. Reachable from
 /// the attacks table (clicking the ID or IP column) and opened in a new tab for
 /// administrators, operators and auditors.
+///
+/// The captured request/response evidence (URI, full-path evidence and the
+/// matched payload) often carries credentials. Only an administrator sees those
+/// bytes in clear: for every other role the value of any parameter named after a
+/// well-known secret (`password`, `token`, `senha`, `密码`, …) is replaced with
+/// `+++++` by [`redact::redact_sensitive_values`] before the page is rendered.
 pub async fn view_waf_request(
     State(state): State<AppState>,
+    session: Session,
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Response, AppError> {
+    let reveal_secrets = auth::is_admin(&session).await?;
     let Some(id) = query
         .get("id")
         .map(|value| sanitize::plain_text(value))
@@ -84,6 +92,17 @@ pub async fn view_waf_request(
     else {
         return Ok((StatusCode::NOT_FOUND, "Attack not found").into_response());
     };
+    // Mask secret parameter values for everyone but an administrator. The three
+    // request/response evidence fields are the ones that carry attacker- and
+    // victim-supplied parameters; the rest (title, CWE, rule match, …) are
+    // describing metadata and are shown unchanged to every viewer.
+    let reveal = |value: String| {
+        if reveal_secrets {
+            value
+        } else {
+            redact::redact_sensitive_values(&value)
+        }
+    };
     let response = render(ViewWafRequestTemplate {
         attack_id: attack.id,
         title: attack.title,
@@ -96,11 +115,12 @@ pub async fn view_waf_request(
         rule_match: attack.rule_match,
         rule_line_match: attack.rule_line_match,
         client_ip: attack.client_ip,
-        request_uri: attack.request_uri,
-        fullpath_evidence: attack.fullpath_evidence,
+        request_uri: reveal(attack.request_uri),
+        fullpath_evidence: reveal(attack.fullpath_evidence),
         // Rendered through the template's default HTML escaping, so the exact
-        // attack bytes are shown inert rather than silently stripped.
-        request_payload: attack.request_payload,
+        // attack bytes are shown inert rather than silently stripped. Secret
+        // parameter values are masked for non-administrators before escaping.
+        request_payload: reveal(attack.request_payload),
     })?;
     Ok(response)
 }
