@@ -462,6 +462,115 @@
     });
   };
 
+  // Rule management: the "List CMC rules" table and its "Submit all" action.
+  // Each row carries a checkbox bound to a module name; ticking enables the
+  // module (true), unticking disables it (false). Submit collects every checkbox
+  // and POSTs the full desired state as JSON. Built with DOM nodes only, so it
+  // stays within the strict CSP / Trusted Types like the rest of the console.
+  const setupCmcRules = () => {
+    const table = qs("[data-cmc-table]");
+    if (!table) return;
+    const tbody = qs("tbody", table);
+    const listUrl = table.getAttribute("data-list-url");
+    const updateUrl = table.getAttribute("data-update-url");
+    const csrfToken = table.getAttribute("data-csrf-token") || "";
+    const submit = qs("[data-cmc-submit]");
+    const info = qs("[data-cmc-info]");
+    const status = qs("[data-cmc-status]");
+    const search = qs("[data-cmc-search]");
+    let all = [];
+
+    // A message box plus a persistent inline banner, used for both the success
+    // confirmation and the "error in WAF server" alert.
+    const showMessage = (message, ok) => {
+      if (status) {
+        status.hidden = false;
+        status.textContent = message;
+        status.className = `form-message ${ok ? "success" : "error"}`;
+      }
+      window.alert(message);
+    };
+
+    const buildRow = (item) => {
+      const tr = document.createElement("tr");
+      const statusTd = badgeCell(item.status ? "enable" : "disable");
+      const checkTd = document.createElement("td");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = Boolean(item.status);
+      input.setAttribute("data-cmc-module", item.name);
+      input.setAttribute("aria-label", `Enable ${item.name}`);
+      input.addEventListener("change", () => {
+        const badge = qs(".badge-status", statusTd);
+        if (badge) {
+          const on = input.checked;
+          badge.textContent = on ? "enable" : "disable";
+          badge.className = `badge-status ${on ? "enable" : "disable"}`;
+        }
+      });
+      checkTd.append(input);
+      tr.append(cell(item.name), statusTd, checkTd);
+      return tr;
+    };
+
+    const renderRows = (rows) => {
+      if (!tbody) return;
+      tbody.replaceChildren(...rows.map(buildRow));
+      if (info) info.textContent = `${rows.length} module(s)`;
+    };
+
+    const applyFilter = () => {
+      const term = (search?.value || "").trim().toLowerCase();
+      renderRows(term ? all.filter((item) => item.name.toLowerCase().includes(term)) : all);
+    };
+
+    const load = async () => {
+      if (tbody) tbody.replaceChildren(statusRow("Loading..."));
+      try {
+        const response = await fetch(listUrl, { headers: { "Accept": "application/json" }, credentials: "same-origin", cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        all = Array.isArray(payload.data) ? payload.data : [];
+        applyFilter();
+      } catch (_error) {
+        all = [];
+        if (tbody) tbody.replaceChildren(statusRow("error in WAF server"));
+        if (info) info.textContent = "WAF error";
+      }
+    };
+
+    search?.addEventListener("input", debounce(applyFilter));
+
+    submit?.addEventListener("click", async () => {
+      const modules = {};
+      qsa("[data-cmc-module]", table).forEach((input) => {
+        modules[input.getAttribute("data-cmc-module")] = input.checked;
+      });
+      if (Object.keys(modules).length === 0) return;
+      submit.disabled = true;
+      try {
+        const response = await fetch(updateUrl, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify({ csrf_token: csrfToken, modules })
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        const enabled = Array.isArray(payload.enabled) ? payload.enabled.length : 0;
+        const disabled = Array.isArray(payload.disabled) ? payload.disabled.length : 0;
+        showMessage(`CMC rules updated successfully (${enabled} enabled, ${disabled} disabled).`, true);
+        await load();
+      } catch (_error) {
+        showMessage("error in WAF server", false);
+      } finally {
+        submit.disabled = false;
+      }
+    });
+
+    load();
+  };
+
   const setupDeleteConfirmations = (root = document) => {
     qsa("[data-confirm-delete]", root).forEach((form) => {
       if (form.getAttribute("data-confirm-ready") === "true") return;
@@ -716,6 +825,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     setupPasswordPolicies();
     setupKwTables();
+    setupCmcRules();
     setupDeleteConfirmations();
     setupDashboard();
     highlightEvidence();

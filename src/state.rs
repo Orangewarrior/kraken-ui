@@ -14,6 +14,7 @@ use crate::{
     },
     services::password_crypto::PasswordCryptoService,
     services::rate_limit::PersistentRateLimiter,
+    services::rule_management::RuleManagementService,
     services::source_update::SourceUpdateService,
     services::waf_metrics::WafMetricsService,
 };
@@ -45,6 +46,9 @@ pub struct AppState {
     pub password_policy: Arc<dyn PasswordPolicy>,
     pub password_crypto: Arc<dyn PasswordCryptoService>,
     pub waf_metrics: WafMetricsService,
+    /// Client for KrakenWAF's rule-management API; `None` when `waf-rule-endpoint`
+    /// or the Rorschach secrets are not configured.
+    pub rule_management: Option<RuleManagementService>,
     pub session_store: SeaOrmSessionStore,
     pub rate_limiting: RateLimiting,
     pub first_time_lock: Arc<Mutex<()>>,

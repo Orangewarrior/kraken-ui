@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>KrakenWAF - CMC rules</title><link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script></head>
+<body data-page="rule-management"><div class="shell admin-shell">{% include "admin_sidebar.html" %}<main class="page admin-content">
+  <section class="page-hero compact-hero"><span class="badge">Rule management</span><h1>List CMC rules</h1><p class="lead">Tick a module to enable it, untick to disable it, then choose Submit all to apply every change to KrakenWAF at once.</p></section>
+  {% if configured %}
+  <section class="table-card">
+    <div class="table-toolbar"><h2>CMC modules</h2><label class="table-search"><span>Search</span><input type="search" data-cmc-search autocomplete="off" placeholder="Module name"></label></div>
+    <p class="form-message" data-cmc-status role="status" aria-live="polite" hidden></p>
+    <div class="table-scroll"><table id="cmc-rules-table" class="kw-table" data-cmc-table data-list-url="/kraken_ui/auth/api/rule_management/cmc" data-update-url="/kraken_ui/auth/rule_management/cmc/update" data-csrf-token="{{ csrf_token }}"><thead><tr><th>CMC module name</th><th>Status</th><th>Enabled</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-footer"><button type="button" class="ghost-button" data-cmc-submit>Submit all</button><span data-cmc-info>Loading...</span></div>
+  </section>
+  {% else %}<section class="panel"><p class="form-message error">Rule management is not configured. Set <code>waf-rule-endpoint</code> in <code>conf/setup.yaml</code> and provision the <code>RORSCHACH_SECRET_EVEN</code> and <code>RORSCHACH_SECRET_ODD</code> secrets (see <code>docs/rule-management.md</code>).</p></section>{% endif %}
+</main></div></body></html>
