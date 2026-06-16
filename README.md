@@ -2,7 +2,7 @@
 
 > The secure-by-default admin console for [KrakenWAF](https://github.com/Orangewarrior/KrakenWaf) — built in Rust.
 
-**Current version: 0.15.0**
+**Current version: 0.16.0**
 
 Kraken UI is a small, hardened web application for operating a KrakenWAF
 deployment: manage operators, watch blocked attacks in real time, and read live
@@ -27,6 +27,12 @@ inline JavaScript.
   to a dedicated `audit.jsonl`, and the WAF metrics channel is pinned to the
   certificate you configure and authenticated with KrakenWAF's shared bearer
   token.
+- **Live rule management.** Administrators and operators can enable or disable
+  KrakenWAF CMC detection modules at runtime from the **Rule management → CMC
+  rules** menu. The UI proxies to KrakenWAF's rule-management API and authenticates
+  each request with a per-request *Rorschach* token (a time-windowed BLAKE2b-256
+  keyed MAC), so the browser never holds a secret. See
+  [docs/rule-management.md](docs/rule-management.md).
 - **Admin-controlled stable updates.** Administrators can download, validate,
   compile and install the latest published Kraken UI release from the Updates
   menu. Runtime databases and local configuration remain untouched.
@@ -155,6 +161,7 @@ Then sign in at `https://host:port/kraken_ui/login`.
 | Dashboard   | `/kraken_ui/auth/admin_panel`, `/kraken_ui/auth/dashboard` |
 | Operators   | `/kraken_ui/auth/insert_user`, `/delete_user`, `/edit_user`, `/show_user_table` |
 | Monitoring  | `/kraken_ui/auth/show_attacks`, `/kraken_ui/auth/view_waf_request/?id=<id>` |
+| Rule management | `/kraken_ui/auth/rule_management/cmc`, `/kraken_ui/auth/api/rule_management/cmc`, `/kraken_ui/auth/rule_management/cmc/update` |
 | Account     | `/kraken_ui/auth/update_password`, `/kraken_ui/auth/mfa` |
 | Updates     | `/kraken_ui/auth/update_kraken_ui` (administrators only) |
 | Two-factor  | `/kraken_ui/auth/mfa_challenge`, `/kraken_ui/auth/mfa_verify` (sign-in challenge) |
@@ -164,7 +171,7 @@ Then sign in at `https://host:port/kraken_ui/login`.
 | Role | Can sign in | Sees |
 |------|-------------|------|
 | `admin`    | yes | Everything: dashboard, attacks, the single-attack detail view, the full ACL menu and self-service password change. |
-| `operator` | yes | The same dashboard, attacks table, attack detail view and password change as an admin — but **without** the ACL menu. |
+| `operator` | yes | The same dashboard, attacks table, attack detail view, **Rule management** and password change as an admin — but **without** the ACL menu. |
 | `auditor`  | not yet | Reserved. Already authorised for the read-only attack detail view; sign-in is not implemented. |
 
 The sidebar is defined once in `src/view/templates/admin_sidebar.html`; the ACL
@@ -216,7 +223,7 @@ src/
 ├── routes/        # endpoint declarations
 ├── controllers/   # HTTP handlers: CSRF, sessions, rendering, pagination
 ├── models/        # SeaORM entities, repositories and the session store
-├── services/      # password crypto and WAF metrics boundaries
+├── services/      # password crypto, WAF metrics and rule-management boundaries
 ├── security/      # sanitisation, password policy, headers, CSRF, rate limiting
 ├── middleware/    # auth, global security headers and the per-IP rate limiter
 └── view/          # Askama templates and local assets
@@ -227,6 +234,8 @@ For the bigger picture, see the [`docs/`](docs/) directory:
 - [Architecture](docs/architecture.md) — how the pieces fit together.
 - [WAF bearer authentication](docs/waf-bearer-auth.md) — shared token loading,
   port `4343`, systemd and troubleshooting.
+- [Rule management](docs/rule-management.md) — the CMC control plane, the
+  Rorschach token, the shared secrets and the `rorschach_keygen` tool.
 - [Source updates](docs/source-updates.md) — admin-only stable release updates,
   preserved files, build requirements and recovery.
 - [Security](docs/security.md) — the controls and why they exist.

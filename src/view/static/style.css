@@ -784,6 +784,16 @@ tr:last-child td {
   font-weight: 900;
 }
 
+.badge-status.enable {
+  background: rgba(54, 214, 107, 0.13);
+  color: var(--success);
+}
+
+.badge-status.disable {
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--muted);
+}
+
 .action-blocked {
   color: var(--accent);
   font-weight: 800;

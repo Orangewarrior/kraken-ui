@@ -4,6 +4,7 @@ pub mod dashboard;
 pub mod health;
 pub mod mfa;
 pub mod pagination;
+pub mod rule_management;
 pub mod setup;
 pub mod update;
 pub mod waf;

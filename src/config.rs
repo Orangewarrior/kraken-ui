@@ -33,6 +33,15 @@ pub struct AppConfig {
     pub waf_endpoint: String,
     #[serde(rename = "waf-cert-ca", default)]
     pub waf_certificate_path: Option<PathBuf>,
+    /// KrakenWAF's rule-management (CMC control plane) listener, which runs on a
+    /// separate port from metrics (KrakenWAF default `4342`). Optional: when
+    /// unset, the rule-management UI is shown as not configured.
+    #[serde(rename = "waf-rule-endpoint", default)]
+    pub waf_rule_endpoint: Option<String>,
+    /// CA that signs the rule-management listener's certificate. Falls back to
+    /// `waf-cert-ca`, then `cert-ca`, when not set.
+    #[serde(rename = "waf-rule-cert-ca", default)]
+    pub waf_rule_certificate_path: Option<PathBuf>,
     #[serde(rename = "log-dir")]
     pub log_directory: PathBuf,
     #[serde(rename = "session-timeout-minutes")]
@@ -55,6 +64,14 @@ impl AppConfig {
         self.waf_certificate_path
             .as_deref()
             .unwrap_or(&self.certificate_path)
+    }
+
+    /// CA for the rule-management channel: the dedicated `waf-rule-cert-ca` if
+    /// set, otherwise the same CA used for the metrics channel.
+    pub fn waf_rule_certificate_path(&self) -> &Path {
+        self.waf_rule_certificate_path
+            .as_deref()
+            .unwrap_or_else(|| self.waf_certificate_path())
     }
 
     fn validate(&self) -> anyhow::Result<()> {
@@ -114,6 +131,20 @@ impl AppConfig {
         if !self.waf_endpoint.starts_with("https://") {
             bail!("waf-endpoint must use https://");
         }
+        if self
+            .waf_rule_endpoint
+            .as_ref()
+            .is_some_and(|endpoint| !endpoint.starts_with("https://"))
+        {
+            bail!("waf-rule-endpoint must use https:// when configured");
+        }
+        if self
+            .waf_rule_certificate_path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            bail!("waf-rule-cert-ca cannot be empty when configured");
+        }
         Ok(())
     }
 }
@@ -165,6 +196,22 @@ session-timeout-minutes: 30
     #[test]
     fn rejects_an_invalid_listen_address() {
         let yaml = VALID.replace("\"127.0.0.1:3443\"", "\"not-a-socket\"");
+        assert!(parse(&yaml).is_err());
+    }
+
+    #[test]
+    fn accepts_an_optional_rule_management_endpoint() {
+        let yaml = format!("{VALID}waf-rule-endpoint: \"https://127.0.0.1:4342\"\n");
+        let config = parse(&yaml).expect("rule endpoint must load");
+        assert_eq!(
+            config.waf_rule_endpoint.as_deref(),
+            Some("https://127.0.0.1:4342")
+        );
+    }
+
+    #[test]
+    fn rejects_a_plaintext_rule_management_endpoint() {
+        let yaml = format!("{VALID}waf-rule-endpoint: \"http://127.0.0.1:4342\"\n");
         assert!(parse(&yaml).is_err());
     }
 

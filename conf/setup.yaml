@@ -6,5 +6,9 @@ db-ui: db/kraken-ui.sqlite
 db-waf-alerts: "../KrakenWAF/logs/db/vulns_alert.db"
 waf-endpoint: "https://127.0.0.1:4343"
 waf-cert-ca: "../KrakenWAF/certs/cert.pem"
+# KrakenWAF rule-management (CMC control plane) listener. Optional: when unset,
+# the Rule management console reports itself as not configured. Defaults to the
+# waf-cert-ca / cert-ca certificate unless waf-rule-cert-ca is set.
+waf-rule-endpoint: "https://127.0.0.1:4342"
 log-dir: log
 session-timeout-minutes: 30

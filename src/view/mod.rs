@@ -16,6 +16,7 @@ pub mod nav {
     pub const ACL: &str = "acl";
     pub const MONITOR: &str = "monitor";
     pub const UPDATES: &str = "updates";
+    pub const RULE_MANAGEMENT: &str = "rule_management";
     pub const USER_STATUS: &str = "user_status";
 }
 
@@ -151,6 +152,17 @@ pub struct ShowAttacksTemplate {
     pub csrf_token: String,
     pub show_acl: bool,
     pub database_available: bool,
+}
+
+#[derive(Template)]
+#[template(path = "rule_management_cmc.htmlx", escape = "html")]
+pub struct RuleManagementCmcTemplate {
+    pub active_page: &'static str,
+    pub csrf_token: String,
+    pub show_acl: bool,
+    /// Whether `waf-rule-endpoint` and the Rorschach secrets are configured. When
+    /// `false`, the page explains what to set instead of rendering the table.
+    pub configured: bool,
 }
 
 #[derive(Template)]

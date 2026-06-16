@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use tower_http::services::ServeDir;
 
 use crate::{
-    controllers::{acl, auth, dashboard, health, mfa, setup, update, waf},
+    controllers::{acl, auth, dashboard, health, mfa, rule_management, setup, update, waf},
     middleware::authentication::{require_admin, require_attack_viewer, require_operator},
     state::AppState,
 };
@@ -54,6 +54,20 @@ pub fn create(state: AppState) -> Router {
         .route("/kraken_ui/auth/api/dashboard", get(dashboard::api))
         .route("/kraken_ui/auth/show_attacks", get(waf::show_attacks))
         .route("/kraken_ui/auth/api/attacks", get(waf::api_attacks))
+        // Rule management: list and apply CMC detection-module toggles. Open to
+        // administrators and operators alike (this is part of operator_routes).
+        .route(
+            "/kraken_ui/auth/rule_management/cmc",
+            get(rule_management::cmc_page),
+        )
+        .route(
+            "/kraken_ui/auth/api/rule_management/cmc",
+            get(rule_management::api_cmc_list),
+        )
+        .route(
+            "/kraken_ui/auth/rule_management/cmc/update",
+            post(rule_management::cmc_update),
+        )
         .route("/kraken_ui/auth/update_password", get(acl::update_password))
         .route(
             "/kraken_ui/auth/update_password_action",

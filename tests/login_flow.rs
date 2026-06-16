@@ -137,6 +137,8 @@ async fn login_dashboard_logout_round_trip() {
         waf_database_path: None,
         waf_endpoint: "https://127.0.0.1:4343".to_owned(),
         waf_certificate_path: None,
+        waf_rule_endpoint: None,
+        waf_rule_certificate_path: None,
         log_directory: directory.path().to_path_buf(),
         session_timeout_minutes: 30,
     };

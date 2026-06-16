@@ -2,6 +2,50 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.16.0 - 2026-06-16
+
+### Added
+
+- **Rule management console.** A new **Rule management → CMC rules** sidebar
+  menu, open to administrators and operators, lists KrakenWAF's CMC detection
+  modules and lets an operator enable or disable them at runtime. The page
+  renders a datatable (CMC module name, status, and a checkbox ticked when the
+  module is on) populated from `GET /rule/control/cmc/list`; **Submit all** posts
+  the full desired state to `POST /rule/control/cmc/update`. Success and failure
+  each raise a message box ("error in WAF server" on failure), and the table
+  reloads from the live state after a successful update.
+- **Rule-management API client** (`services::rule_management`). Authenticates to
+  KrakenWAF's rule-management API with a per-request *Rorschach* token: a
+  time-windowed (`floor(unix/300)`) BLAKE2b-256 keyed MAC over a canonical
+  message binding the method, path and body hash, encoded base64url without
+  padding. The secret is selected by step parity. TLS is pinned to the configured
+  CA, the `Authorization` header is marked sensitive, and the token and secrets
+  never reach logs. KrakenWAF computes the same MAC with `orion`; Kraken UI uses
+  libsodium BLAKE2b via `dryoc`, which is byte-identical (verified by a BLAKE2b
+  known-answer test).
+- **Shared Rorschach secrets**, reusing KrakenWAF's names and file-first
+  resolution (`<NAME>_FILE` → `/run/secrets/krakenwaf/<NAME>` → `<NAME>`):
+  `RORSCHACH_SECRET_EVEN`, `RORSCHACH_SECRET_ODD` and `RORSCHACH_CLIENT_ID`. A
+  co-located deployment reuses KrakenWAF's mount; otherwise the new
+  `rorschach_keygen` binary generates a random pair (64 bytes, base64url) and can
+  write CIS-style secret files (dir `0750`, files `0440`).
+- New configuration keys `waf-rule-endpoint` (must be `https://`) and the
+  optional `waf-rule-cert-ca`, validated at load time. When unset, the console
+  reports itself as not configured rather than failing.
+- New documentation: [docs/rule-management.md](docs/rule-management.md). The new
+  secrets and how to fill them with random values are documented in
+  [docs/security.md](docs/security.md).
+
+### Tests
+
+- Unit tests for the Rorschach token (canonical message order, five-part header
+  shape, even/odd secret selection, the documented update body) and a BLAKE2b-256
+  known-answer test pinning `dryoc` to the standard vector.
+- A new isolated integration test (`tests/rule_management_http.rs`) drives the
+  full Kraken UI router and a mock KrakenWAF over real HTTP with `reqwest`: it
+  logs in, lists modules through the proxy and submits a toggle, asserting the
+  Rorschach `Authorization` token and the exact upstream JSON body.
+
 ## 0.15.0 - 2026-06-13
 
 ### Security

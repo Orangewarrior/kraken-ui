@@ -33,6 +33,7 @@ use crate::{
     services::{
         password_crypto::{DryocPasswordCryptoService, PasswordCryptoService},
         rate_limit::{PersistentRateLimiter, RateLimitConfig},
+        rule_management::RuleManagementService,
         source_update::SourceUpdateService,
         waf_metrics::WafMetricsService,
     },
@@ -43,6 +44,7 @@ pub struct AppFactory {
     config: AppConfig,
     password_crypto: Option<Arc<dyn PasswordCryptoService>>,
     waf_metrics: Option<WafMetricsService>,
+    rule_management: Option<RuleManagementService>,
     server_handle: Option<Handle<SocketAddr>>,
     rate_limit_config: Option<RateLimitConfig>,
 }
@@ -53,6 +55,7 @@ impl AppFactory {
             config,
             password_crypto: None,
             waf_metrics: None,
+            rule_management: None,
             server_handle: None,
             rate_limit_config: None,
         }
@@ -65,6 +68,11 @@ impl AppFactory {
 
     pub fn with_waf_metrics(mut self, waf_metrics: WafMetricsService) -> Self {
         self.waf_metrics = Some(waf_metrics);
+        self
+    }
+
+    pub fn with_rule_management(mut self, rule_management: RuleManagementService) -> Self {
+        self.rule_management = Some(rule_management);
         self
     }
 
@@ -138,6 +146,10 @@ impl AppFactory {
                 .await?
             }
         };
+        let rule_management = match self.rule_management {
+            Some(service) => Some(service),
+            None => build_rule_management(&self.config).await?,
+        };
         let security_headers = headers::load("conf/headers_sec.txt").await?;
         let session_store = SeaOrmSessionStore::new(database.clone()).await?;
         let source_update = Arc::new(SourceUpdateService::new(self.server_handle)?);
@@ -149,6 +161,7 @@ impl AppFactory {
             password_policy,
             password_crypto,
             waf_metrics,
+            rule_management,
             session_store: session_store.clone(),
             rate_limiting: RateLimiting {
                 login_throttle: Arc::new(LoginThrottle::with_defaults()),
@@ -298,6 +311,45 @@ pub fn initialize_logging(config: &AppConfig) -> anyhow::Result<Vec<WorkerGuard>
     Ok(vec![app_guard, audit_guard])
 }
 
+/// Builds the rule-management client when `waf-rule-endpoint` is configured and
+/// both Rorschach secrets resolve. The secrets share KrakenWAF's names and
+/// file-first order, so a co-located deployment reuses the same
+/// `/run/secrets/krakenwaf/<NAME>` mount; a split deployment provisions its own
+/// pair (generate them with the `rorschach_keygen` binary).
+async fn build_rule_management(
+    config: &AppConfig,
+) -> anyhow::Result<Option<RuleManagementService>> {
+    let Some(endpoint) = config.waf_rule_endpoint.as_deref() else {
+        return Ok(None);
+    };
+    let (Some(secret_even), Some(secret_odd)) = (
+        secrets::load_secret("RORSCHACH_SECRET_EVEN"),
+        secrets::load_secret("RORSCHACH_SECRET_ODD"),
+    ) else {
+        warn!(
+            "waf-rule-endpoint is set but RORSCHACH_SECRET_EVEN/RORSCHACH_SECRET_ODD are not \
+             available; rule management is disabled. Generate them with rorschach_keygen or \
+             share KrakenWAF's /run/secrets/krakenwaf mount."
+        );
+        return Ok(None);
+    };
+    let client_id =
+        secrets::load_secret("RORSCHACH_CLIENT_ID").unwrap_or_else(|| "kraken-ui".to_owned());
+    let service = RuleManagementService::from_config(
+        endpoint,
+        config.waf_rule_certificate_path(),
+        &client_id,
+        &secret_even,
+        &secret_odd,
+    )
+    .await?;
+    info!(
+        client_id = %client_id,
+        "WAF rule-management (Rorschach) client enabled"
+    );
+    Ok(Some(service))
+}
+
 async fn bootstrap_administrator(
     database: &sea_orm::DatabaseConnection,
     password_policy: &dyn PasswordPolicy,
@@ -437,6 +489,8 @@ mod tests {
             waf_database_path: None,
             waf_endpoint: "https://127.0.0.1:4343".to_owned(),
             waf_certificate_path: None,
+            waf_rule_endpoint: None,
+            waf_rule_certificate_path: None,
             log_directory: directory.path().to_path_buf(),
             session_timeout_minutes: 30,
         };
@@ -487,6 +541,8 @@ mod tests {
             waf_database_path: None,
             waf_endpoint: "https://127.0.0.1:4343".to_owned(),
             waf_certificate_path: None,
+            waf_rule_endpoint: None,
+            waf_rule_certificate_path: None,
             log_directory: directory.path().to_path_buf(),
             session_timeout_minutes: 30,
         };
