@@ -2,6 +2,72 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.18.0 - 2026-06-17
+
+### Added
+
+- **Regex rule editor (Rule management → Regex rules).** Administrators and
+  operators can now view and replace the content of KrakenWAF's regex and keyword
+  rule files at runtime — `body_regex`, `path_regex`, `header_regex`,
+  `vectorscan_list` and `scanners` — from a new console surface. The picker
+  (`/kraken_ui/auth/rule_management/regex`) chooses a rule list; the editor
+  (`/kraken_ui/auth/rule_management/regex/edit`) fetches its content server-side
+  from KrakenWAF `POST /rule/control/regex/view` and renders it in a
+  syntax-highlighting editor; **Update rule**
+  (`/kraken_ui/auth/rule_management/regex/update`) validates the content and
+  forwards it to KrakenWAF `POST /rule/control/regex/update/<name>`. As with CMC,
+  the browser never holds a Rorschach secret and never contacts the WAF directly;
+  each upstream call is minted server-side and bound to its method, path and body.
+- **Per-shape validation via a factory.** A new `services::regex_rules` module
+  maps each rule list (an allowlisted enum) to the codec that knows its on-disk
+  shape: the JSON regex bundles require a non-empty `rules` array whose elements
+  carry every required field and a non-empty `rule_match`; the Vectorscan keyword
+  bundle requires only the non-empty `rules` envelope; the scanner allowlist is
+  line-delimited text wrapped as `{ "lines": [...] }`. Validation runs before the
+  WAF is contacted and returns a specific, operator-facing message (empty file,
+  broken JSON, or the exact rule index and missing field).
+- **Vendored ACE editor.** The official `ace-builds` 1.36.5 editor is vendored
+  under `src/view/static/vendor/ace` (with its `LICENSE`). The integration stays
+  within the strict CSP: ACE stylesheets are linked as static files with runtime
+  style injection disabled (`useStrictCSP`), the JSON worker loads from a
+  same-origin URL rather than a blob (`loadWorkerFromBlob = false`), and no
+  `innerHTML` is used. The editor highlights JSON with the *Clouds Midnight*
+  theme (plain text for the scanner list), shows the gutter, line numbers, indent
+  guides, the active line and the selected word, uses full-line selection and the
+  browser spell checker. Every regex editor page carries a fixed ReDoS / PCRE
+  caution below the editor.
+
+### Security
+
+- The regex rule name is always re-validated against a closed allowlist before it
+  is used, so a forged name can never become part of an upstream path or reach the
+  WAF. Updates are CSRF-protected and validated before any upstream call; the
+  routes sit behind `require_operator`, so auditors (who cannot authenticate to
+  the console at all) can neither view nor edit rules.
+
+### Tests
+
+- Unit tests for `services::regex_rules` (allowlist parsing, editor mode
+  selection, and every codec: valid input, empty input, broken JSON, missing
+  `rules`, empty `rules`, missing/empty fields, keyword envelope, and scanner line
+  wrapping) and for the new service shapes (`regex_view` body and response).
+- A view test that the editor template HTML-escapes rule content and always
+  renders the ReDoS caution and the same-origin ACE bundle.
+- A new isolated, real-HTTP integration test
+  (`tests/regex_rule_management_http.rs`): an admin views and updates a rule over
+  two real loopback servers (asserting the Rorschach token, the documented view
+  body, the update path and the verbatim written bytes), an empty file and a
+  missing field are refused with actionable messages before the WAF, a forged CSRF
+  token is rejected, an auditor cannot obtain a session, and an unauthenticated
+  client is bounced from the editor routes.
+
+### Documentation
+
+- [docs/rule-management.md](docs/rule-management.md) gains a **Regex rule editor**
+  section: the managed rule lists, the flow, the upstream endpoints and bodies,
+  and the CSP-compatible ACE integration.
+- README updated with the new feature, route table entries and version.
+
 ## 0.17.0 - 2026-06-16
 
 ### Security

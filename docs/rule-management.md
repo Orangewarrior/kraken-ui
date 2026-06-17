@@ -1,9 +1,13 @@
 # KrakenWAF rule management
 
-Kraken UI 0.16.0 can drive KrakenWAF's **Rule Management API**, the control plane
-that toggles CMC detection modules at runtime without restarting the WAF. The
-console exposes it under **Rule management → CMC rules** for administrators and
-operators.
+Kraken UI can drive KrakenWAF's **Rule Management API**, the control plane that
+changes detection rules at runtime without restarting the WAF. The console
+exposes two surfaces for administrators and operators:
+
+- **Rule management → CMC rules** — toggle CMC detection modules on and off
+  (since 0.16.0).
+- **Rule management → Regex rules** — view and replace the content of the regex
+  and keyword rule files (since 0.18.0).
 
 This document describes how Kraken UI communicates with that API: the endpoints,
 the request and response shapes, the Rorschach authentication token, and the
@@ -81,6 +85,106 @@ with the modules it changed, which Kraken UI surfaces in the confirmation box:
   "updated": { "disabled": ["Silent_sql_errors", "HPP_detect"], "enabled": [] }
 }
 ```
+
+## Regex rule editor
+
+The regex editor lets an operator open a rule file, edit its content in a
+syntax-highlighting editor and write it back. As with CMC, the browser never
+holds a Rorschach secret and never talks to KrakenWAF directly: every upstream
+call is minted and made server-side.
+
+### Managed rule lists
+
+Only this closed allowlist of rule lists can be viewed or edited. A name outside
+the list is rejected before any request is built, so it can never become part of
+an upstream path.
+
+| Rule name | KrakenWAF file | Shape | Editor validation |
+|---|---|---|---|
+| `body_regex`      | `regex/body_regex.json`            | JSON regex bundle   | Non-empty `rules` array; every rule carries the required fields and a non-empty `rule_match`. |
+| `path_regex`      | `regex/path_regex.json`            | JSON regex bundle   | As `body_regex`. |
+| `header_regex`    | `regex/header_regex.json`          | JSON regex bundle   | As `body_regex`. |
+| `vectorscan_list` | `Vectorscan/strings2block.json`    | JSON keyword bundle | Non-empty `rules` array (the keyword entries are not regex rules, so per-field checks do not apply). |
+| `scanners`        | `user_agents/scanners.txt`         | Line-delimited text | At least one non-empty line. |
+
+The required fields on a regex rule element are: `enable`, `http_action`,
+`title`, `severity`, `cwe`, `description`, `url`, `rule_match`, `id`, `score`.
+
+### The flow
+
+1. **Rule management → Regex rules** opens the picker
+   (`GET /kraken_ui/auth/rule_management/regex`): a select box of the rule lists
+   above and a **submit rule to edit** button.
+2. Choosing a list navigates to the editor
+   (`GET /kraken_ui/auth/rule_management/regex/edit?rule=<name>`). The backend
+   mints a token and calls KrakenWAF `POST /rule/control/regex/view`, then renders
+   the returned content in the editor.
+3. The operator edits the content and chooses **Update rule**. The browser POSTs
+   the content (with the CSRF token) to
+   `POST /kraken_ui/auth/rule_management/regex/update?rule=<name>`.
+4. The backend validates the content for that rule list's shape (see the table).
+   On failure it returns `400` with a specific message — for example
+   *“The rule file cannot be empty.”* or *“Rule #2 is missing the required
+   "rule_match" field.”* — and **never** contacts the WAF.
+5. On success it mints a fresh token and calls KrakenWAF
+   `POST /rule/control/regex/update/<name>`. A confirmation alert reports how many
+   items were written; any upstream failure surfaces as **`error in WAF server`**,
+   with the detail kept to the application log.
+
+### Upstream endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/rule/control/regex/view`          | Retrieve the full content of one rule file. |
+| `POST` | `/rule/control/regex/update/<name>` | Replace the content of one rule file (hot-reloaded). |
+
+`POST /rule/control/regex/view` sends the rule name and receives the file content
+as a single string:
+
+```json
+{ "rule_view": "body_regex" }
+```
+
+```json
+{ "status": "ok", "context": "regex_view", "rule": "body_regex",
+  "content": "{\n  \"rules\": [ ... ]\n}\n" }
+```
+
+`POST /rule/control/regex/update/<name>` carries the new content in the body. For
+the JSON bundles it is the rule object itself, written verbatim so the operator's
+formatting is preserved:
+
+```json
+{ "rules": [ { "enable": 1, "http_action": "Request", "title": "...",
+  "severity": "critical", "cwe": "CWE-78", "description": "...", "url": "...",
+  "rule_match": "(?i)...", "id": "00001", "score": 1000 } ] }
+```
+
+For the scanner allowlist the editor's lines are wrapped before sending:
+
+```json
+{ "lines": ["arachni", "sqlmap", "nikto"] }
+```
+
+KrakenWAF replies with the number of items written, surfaced in the confirmation:
+
+```json
+{ "status": "ok", "context": "regex_update", "rule": "body_regex", "rules_written": 1 }
+```
+
+### Editor and CSP
+
+The editor uses the vendored [ACE](https://ace.c9.io/) build in
+`src/view/static/vendor/ace` (its `LICENSE` is kept alongside it). To stay within
+the app's strict Content-Security-Policy, ACE's stylesheets are linked as static
+files and its runtime style injection is disabled (`useStrictCSP`), the JSON
+worker is loaded from a same-origin URL rather than a blob
+(`loadWorkerFromBlob = false`), and no `innerHTML` is used by the integration. It
+highlights JSON, with the *Clouds Midnight* theme; the scanner list uses plain
+text mode.
+
+Every regex editor page carries a fixed caution about ReDoS and the dangers of
+PCRE-style regex.
 
 ## Authentication: the Rorschach token
 
