@@ -10,7 +10,7 @@
 
   const host = document.querySelector("[data-ace-editor]");
   const source = document.getElementById("rule-source");
-  if (!host || !source || typeof window.ace === "undefined") return;
+  if (!host || !source) return;
 
   const mode = host.getAttribute("data-editor-mode") || "ace/mode/json";
   const updateUrl = host.getAttribute("data-update-url");
@@ -18,50 +18,110 @@
   const submit = document.querySelector("[data-regex-submit]");
   const status = document.querySelector("[data-regex-status]");
   const isJson = mode === "ace/mode/json";
+  let editor = null;
 
-  // CSP-critical configuration, set before the editor is created.
-  window.ace.config.set("basePath", "/static/vendor/ace");
-  window.ace.config.set("loadWorkerFromBlob", false);
-  window.ace.config.set("useStrictCSP", true);
+  const setStatus = (message, ok) => {
+    if (!status) return;
+    status.hidden = false;
+    status.textContent = message;
+    status.className = `form-message ${ok ? "success" : "error"}`;
+  };
 
-  const editor = window.ace.edit(host);
-  editor.setTheme("ace/theme/clouds_midnight");
-  editor.session.setMode(mode);
-  editor.setOptions({
-    showGutter: true,            // show gutter
-    showLineNumbers: true,       // show line numbers
-    displayIndentGuides: true,   // show indent guides
-    highlightActiveLine: true,   // highlight active line
-    highlightSelectedWord: true, // highlight selected word
-    selectionStyle: "line",      // full line selection
-    useSoftTabs: true,           // soft tabs keep auto-indent consistent
-    tabSize: 2,
-    showPrintMargin: false,
-  });
-  // Auto-indent new lines from the active mode.
-  editor.getSession().setUseSoftTabs(true);
+  const currentContent = () => editor ? editor.getValue() : source.value;
 
-  // Enable the browser spell checker on ACE's hidden input element.
-  try {
-    const input = editor.textInput && editor.textInput.getElement
-      ? editor.textInput.getElement()
-      : host.querySelector("textarea");
-    if (input) input.setAttribute("spellcheck", "true");
-  } catch (_error) {
-    /* spellcheck is best-effort; never block editing over it */
+  if (typeof window.ace === "undefined") {
+    host.hidden = true;
+    setStatus("Syntax editor failed to load; using the textarea editor.", false);
+  } else {
+    try {
+      // CSP-critical configuration, set before the editor is created.
+      window.ace.config.set("basePath", "/static/vendor/ace");
+      window.ace.config.set("loadWorkerFromBlob", false);
+      window.ace.config.set("useStrictCSP", true);
+      const aceDom = window.ace.require && window.ace.require("ace/lib/dom");
+      if (aceDom) {
+        aceDom.removeChildren = (element) => element.replaceChildren();
+      }
+
+      const initialContent = source.value;
+      const aceSource = document.createElement("textarea");
+      aceSource.value = initialContent;
+      aceSource.hidden = true;
+      aceSource.setAttribute("aria-hidden", "true");
+      host.before(aceSource);
+      host.remove();
+
+      // ACE calls `innerHTML = ""` when initialized from a generic element,
+      // which violates the app's Trusted Types CSP. Its textarea path avoids
+      // that sink by replacing the textarea with a generated editor container.
+      editor = window.ace.edit(aceSource);
+      const editorHost = editor.container;
+      editorHost.id = host.id;
+      editorHost.className = host.className;
+      editorHost.setAttribute("data-ace-editor", "");
+      editorHost.setAttribute("data-editor-mode", mode);
+      editorHost.setAttribute("data-update-url", updateUrl || "");
+      editorHost.setAttribute("data-csrf-token", csrfToken);
+      editor.setTheme("ace/theme/clouds_midnight");
+      editor.session.setUseWorker(false);
+      editor.session.setMode(mode);
+      editor.session.setUseWorker(false);
+      editor.setOptions({
+        showGutter: true,            // show gutter
+        showLineNumbers: true,       // show line numbers
+        displayIndentGuides: true,   // show indent guides
+        highlightActiveLine: true,   // highlight active line
+        highlightSelectedWord: true, // highlight selected word
+        selectionStyle: "line",      // full line selection
+        useSoftTabs: true,           // soft tabs keep auto-indent consistent
+        tabSize: 2,
+        showPrintMargin: false,
+      });
+      // Auto-indent new lines from the active mode.
+      editor.getSession().setUseSoftTabs(true);
+
+      // Enable the browser spell checker on ACE's hidden input element.
+      try {
+        const input = editor.textInput && editor.textInput.getElement
+          ? editor.textInput.getElement()
+          : host.querySelector("textarea");
+        if (input) input.setAttribute("spellcheck", "true");
+      } catch (_error) {
+        /* spellcheck is best-effort; never block editing over it */
+      }
+
+      // Load the content via the textarea value (exact bytes, no markup execution)
+      // and place the cursor at the start.
+      editor.clearSelection();
+      if (editor.getValue() === initialContent) {
+        source.hidden = true;
+        source.setAttribute("aria-hidden", "true");
+        window.requestAnimationFrame(() => {
+          editor.resize();
+          editor.renderer.updateFull();
+        });
+      } else {
+        editor.destroy();
+        editor.container.remove();
+        editor = null;
+        source.hidden = false;
+        source.removeAttribute("aria-hidden");
+        setStatus("Syntax editor did not load the rule content; using the textarea editor.", false);
+      }
+    } catch (_error) {
+      if (editor) {
+        editor.destroy();
+        editor.container.remove();
+      }
+      editor = null;
+      source.hidden = false;
+      source.removeAttribute("aria-hidden");
+      setStatus("Syntax editor failed to initialize; using the textarea editor.", false);
+    }
   }
 
-  // Load the content via the textarea value (exact bytes, no markup execution)
-  // and place the cursor at the start.
-  editor.setValue(source.value, -1);
-  editor.clearSelection();
-
   const showMessage = (message, ok) => {
-    if (status) {
-      status.hidden = false;
-      status.textContent = message;
-      status.className = `form-message ${ok ? "success" : "error"}`;
-    }
+    setStatus(message, ok);
     window.alert(message);
   };
 
@@ -83,7 +143,7 @@
 
   submit?.addEventListener("click", async () => {
     if (!updateUrl) return;
-    const content = editor.getValue();
+    const content = currentContent();
     const localError = validateLocally(content);
     if (localError) {
       showMessage(localError, false);

@@ -2,6 +2,32 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.18.1 - 2026-06-18
+
+### Fixed
+
+- Fixed the regex rule editor so rule content remains visible and editable when
+  the ACE bundle fails to load or initialize. The editor now renders a styled
+  textarea fallback by default and upgrades to ACE only after the syntax editor
+  has successfully loaded the rule content.
+- Restored ACE syntax highlighting under the application's strict Trusted Types
+  CSP. The integration now initializes ACE through its textarea path, patches the
+  local `ace/lib/dom.removeChildren` hook to use `replaceChildren()`, and disables
+  the JSON worker that requires a TrustedScriptURL policy. JSON highlighting,
+  theme, gutter, line numbers and editing remain active.
+- Fixed the duplicate-editor regression on regex rule pages: when ACE is active,
+  the fallback textarea is hidden immediately and CSS now explicitly honors the
+  textarea's `hidden` state.
+
+### Tests
+
+- Updated `tests/regex_rule_management_http.rs` to pin the progressive
+  enhancement contract: rule content is present in a fallback textarea while ACE
+  remains a browser-side enhancement.
+- Verified the running page in headless Chrome against `header_regex` and
+  `body_regex`, confirming ACE is visible, the fallback textarea is hidden, and
+  the full rule content is loaded into the ACE document.
+
 ## 0.18.0 - 2026-06-17
 
 ### Added

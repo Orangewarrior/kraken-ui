@@ -14,8 +14,8 @@
   {% if loaded %}
   <section class="panel">
     <p class="form-message" data-regex-status role="status" aria-live="polite" hidden></p>
-    <textarea id="rule-source" hidden aria-hidden="true">{{ content }}</textarea>
-    <div id="rule-editor" class="ace-editor-host" data-ace-editor data-editor-mode="{{ editor_mode }}" data-update-url="/kraken_ui/auth/rule_management/regex/update?rule={{ rule_name }}" data-csrf-token="{{ csrf_token }}"></div>
+    <textarea id="rule-source" class="rule-source-editor" data-rule-source spellcheck="false">{{ content }}</textarea>
+    <div id="rule-editor" class="ace-editor-host" data-ace-editor data-editor-mode="{{ editor_mode }}" data-update-url="/kraken_ui/auth/rule_management/regex/update?rule={{ rule_name }}" data-csrf-token="{{ csrf_token }}" hidden></div>
     <div class="table-footer"><button type="button" class="ghost-button" data-regex-submit>Update rule</button></div>
     <div class="regex-warning" role="note">
       <p class="regex-warning-alert">When you write a rule with regex, take care with ReDOS, and remember PCRE type regex is dangerous because anyone can inject a eval evil resources.</p>

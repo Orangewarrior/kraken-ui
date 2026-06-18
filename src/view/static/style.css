@@ -2136,6 +2136,31 @@ tr:last-child td {
   overflow: hidden;
 }
 
+.rule-source-editor {
+  display: block;
+  width: 100%;
+  min-height: 420px;
+  height: 60vh;
+  margin: 0.4rem 0 0.2rem;
+  padding: 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  color: #e8edf5;
+  background: #101825;
+  font: 0.9rem/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  resize: vertical;
+  tab-size: 2;
+}
+
+.rule-source-editor[hidden] {
+  display: none !important;
+}
+
+.rule-source-editor:focus {
+  outline: 3px solid rgba(255, 176, 0, 0.45);
+  outline-offset: 2px;
+}
+
 .stacked-form {
   display: flex;
   flex-direction: column;

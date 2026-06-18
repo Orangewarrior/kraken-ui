@@ -354,8 +354,10 @@ async fn regex_rules_view_and_update_round_trip() {
     assert!(editor_html.contains("/static/vendor/ace/ace.js"));
     assert!(editor_html.contains("Update rule"));
     assert!(editor_html.contains("take care with ReDOS"));
-    // The rule content is present (HTML-escaped) in the hidden source textarea.
+    // The rule content is present in a visible textarea; ACE is progressive
+    // enhancement, so operators can still edit when the browser blocks it.
     assert!(editor_html.contains("Command injection separators body"));
+    assert!(editor_html.contains(r#"<textarea id="rule-source" class="rule-source-editor""#));
 
     // The WAF view request carried a Rorschach token and the documented body.
     {
