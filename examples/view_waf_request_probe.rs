@@ -28,7 +28,10 @@ const MASK: &str = "+++++";
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut args = std::env::args().skip(1);
+    // Plain CLI flag parsing; argv drives no security decision (it only selects
+    // this manual probe's target and credentials), so the semgrep args advisory
+    // does not apply.
+    let mut args = std::env::args().skip(1); // nosemgrep
     let base = args.next().unwrap_or_else(|| usage_and_exit());
     let login = args.next().unwrap_or_else(|| usage_and_exit());
     let password = args.next().unwrap_or_else(|| usage_and_exit());

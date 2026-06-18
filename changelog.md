@@ -68,6 +68,13 @@ All notable changes to this project are recorded in this file.
   and the CSP-compatible ACE integration.
 - README updated with the new feature, route table entries and version.
 
+### CI
+
+- Cleared the pre-existing `rust.lang.security.args` Semgrep finding on the
+  `view_waf_request_probe` example by adding the same justified `// nosemgrep`
+  suppression the codebase already uses for benign CLI argv parsing (the probe's
+  argv selects only its target and credentials and drives no security decision).
+
 ## 0.17.0 - 2026-06-16
 
 ### Security
