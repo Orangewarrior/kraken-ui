@@ -2,7 +2,7 @@
 
 > The secure-by-default admin console for [KrakenWAF](https://github.com/Orangewarrior/KrakenWaf) — built in Rust.
 
-**Current version: 0.18.1**
+**Current version: 0.19.0**
 
 Kraken UI is a small, hardened web application for operating a KrakenWAF
 deployment: manage operators, watch blocked attacks in real time, and read live
@@ -174,12 +174,14 @@ Then sign in at `https://host:port/kraken_ui/login`.
 
 | Role | Can sign in | Sees |
 |------|-------------|------|
-| `admin`    | yes | Everything: dashboard, attacks, the single-attack detail view (**including secret parameter values in clear**), the full ACL menu and self-service password change. |
-| `operator` | yes | The same dashboard, attacks table, attack detail view, **Rule management** and password change as an admin — but **without** the ACL menu, and with **secret parameter values masked** on the attack detail view. |
-| `auditor`  | not yet | Reserved. Already authorised for the read-only attack detail view (with **secret parameter values masked**); sign-in is not implemented. |
+| `admin`    | yes | Everything: dashboard, attacks, the single-attack detail view (**including secret parameter values in clear**), the full ACL menu, Updates, Rule management and self-service account settings. |
+| `operator` | yes | The same dashboard, attacks table, attack detail view, **Rule management** and account settings as an admin — but **without** the ACL and Updates menus, and with **secret parameter values masked** on the attack detail view. |
+| `auditor`  | yes | Read-only. Dashboard, the attacks monitor (table and the single-attack detail view, with **secret parameter values masked**) and its own account settings (change password, manage two-factor) plus logout — **no** Rule management, ACL or Updates. |
 
 The sidebar is defined once in `src/view/templates/admin_sidebar.html`; the ACL
-section is rendered only when the controller passes `show_acl = true` (admins).
+and Updates sections are rendered only when the controller passes
+`show_acl = true` (admins), and the Rule-management section only when
+`show_rule_management = true` (admins and operators, never auditors).
 
 ### The single-attack detail view
 

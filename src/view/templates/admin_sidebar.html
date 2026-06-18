@@ -37,6 +37,7 @@
       </div>
     </div>
     {% endif %}
+    {% if show_rule_management %}
     <div class="nav-section">
       <button class="nav-trigger{% if active_page == "rule_management" %} active{% endif %}" type="button" data-accordion aria-expanded="true" aria-controls="rule-management-menu">
         <span class="nav-icon" aria-hidden="true">R</span><strong>Rule management</strong><span class="chevron" aria-hidden="true">v</span>
@@ -46,6 +47,7 @@
         <a href="/kraken_ui/auth/rule_management/regex">Regex rules</a>
       </div>
     </div>
+    {% endif %}
     <div class="nav-section">
       <button class="nav-trigger{% if active_page == "monitor" %} active{% endif %}" type="button" data-accordion aria-expanded="true" aria-controls="monitor-menu">
         <span class="nav-icon" aria-hidden="true">M</span><strong>Monitor</strong><span class="chevron" aria-hidden="true">v</span>
@@ -68,5 +70,5 @@
       </div>
     </div>
   </nav>
-  <section class="status-card"><span>{% if show_acl %}Admin console{% else %}Operator console{% endif %}</span><strong>Authenticated</strong><small>TLS session active</small></section>
+  <section class="status-card"><span>{% if show_acl %}Admin console{% else if show_rule_management %}Operator console{% else %}Auditor console{% endif %}</span><strong>Authenticated</strong><small>TLS session active</small></section>
 </aside>

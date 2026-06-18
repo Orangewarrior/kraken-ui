@@ -41,6 +41,10 @@ pub struct DashboardTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
     pub show_acl: bool,
+    /// Whether the Rule-management sidebar section is shown. True for
+    /// administrators and operators; false for auditors, whose console is
+    /// read-only (dashboard, attacks monitor and their own account settings).
+    pub show_rule_management: bool,
 }
 
 #[derive(Template)]
@@ -49,6 +53,10 @@ pub struct AddUserTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
     pub show_acl: bool,
+    /// Whether the Rule-management sidebar section is shown. True for
+    /// administrators and operators; false for auditors, whose console is
+    /// read-only (dashboard, attacks monitor and their own account settings).
+    pub show_rule_management: bool,
     pub roles: Vec<RoleOption>,
     pub show_form: bool,
     pub message: String,
@@ -61,6 +69,10 @@ pub struct DeleteUserTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
     pub show_acl: bool,
+    /// Whether the Rule-management sidebar section is shown. True for
+    /// administrators and operators; false for auditors, whose console is
+    /// read-only (dashboard, attacks monitor and their own account settings).
+    pub show_rule_management: bool,
     pub user_identity: String,
     pub message: String,
     pub message_class: &'static str,
@@ -72,6 +84,10 @@ pub struct EditUserTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
     pub show_acl: bool,
+    /// Whether the Rule-management sidebar section is shown. True for
+    /// administrators and operators; false for auditors, whose console is
+    /// read-only (dashboard, attacks monitor and their own account settings).
+    pub show_rule_management: bool,
     pub has_user: bool,
     pub id_user: i32,
     pub username: String,
@@ -88,6 +104,10 @@ pub struct ShowUserTableTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
     pub show_acl: bool,
+    /// Whether the Rule-management sidebar section is shown. True for
+    /// administrators and operators; false for auditors, whose console is
+    /// read-only (dashboard, attacks monitor and their own account settings).
+    pub show_rule_management: bool,
 }
 
 #[derive(Template)]
@@ -96,6 +116,10 @@ pub struct UpdateKrakenUiTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
     pub show_acl: bool,
+    /// Whether the Rule-management sidebar section is shown. True for
+    /// administrators and operators; false for auditors, whose console is
+    /// read-only (dashboard, attacks monitor and their own account settings).
+    pub show_rule_management: bool,
     pub current_version: &'static str,
 }
 
@@ -105,6 +129,10 @@ pub struct UpdatePasswordTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
     pub show_acl: bool,
+    /// Whether the Rule-management sidebar section is shown. True for
+    /// administrators and operators; false for auditors, whose console is
+    /// read-only (dashboard, attacks monitor and their own account settings).
+    pub show_rule_management: bool,
     pub id_user: i32,
     pub username: String,
     pub email: String,
@@ -119,6 +147,10 @@ pub struct MfaTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
     pub show_acl: bool,
+    /// Whether the Rule-management sidebar section is shown. True for
+    /// administrators and operators; false for auditors, whose console is
+    /// read-only (dashboard, attacks monitor and their own account settings).
+    pub show_rule_management: bool,
     /// Whether two-factor is currently active for the signed-in operator.
     pub enabled: bool,
     pub remaining_recovery_codes: u64,
@@ -151,6 +183,10 @@ pub struct ShowAttacksTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
     pub show_acl: bool,
+    /// Whether the Rule-management sidebar section is shown. True for
+    /// administrators and operators; false for auditors, whose console is
+    /// read-only (dashboard, attacks monitor and their own account settings).
+    pub show_rule_management: bool,
     pub database_available: bool,
 }
 
@@ -160,6 +196,10 @@ pub struct RuleManagementCmcTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
     pub show_acl: bool,
+    /// Whether the Rule-management sidebar section is shown. True for
+    /// administrators and operators; false for auditors, whose console is
+    /// read-only (dashboard, attacks monitor and their own account settings).
+    pub show_rule_management: bool,
     /// Whether `waf-rule-endpoint` and the Rorschach secrets are configured. When
     /// `false`, the page explains what to set instead of rendering the table.
     pub configured: bool,
@@ -171,6 +211,10 @@ pub struct RuleManagementRegexSelectTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
     pub show_acl: bool,
+    /// Whether the Rule-management sidebar section is shown. True for
+    /// administrators and operators; false for auditors, whose console is
+    /// read-only (dashboard, attacks monitor and their own account settings).
+    pub show_rule_management: bool,
     /// Whether the rule-management channel is configured; when `false` the page
     /// explains what to set instead of rendering the form.
     pub configured: bool,
@@ -184,6 +228,10 @@ pub struct RuleManagementRegexEditTemplate {
     pub active_page: &'static str,
     pub csrf_token: String,
     pub show_acl: bool,
+    /// Whether the Rule-management sidebar section is shown. True for
+    /// administrators and operators; false for auditors, whose console is
+    /// read-only (dashboard, attacks monitor and their own account settings).
+    pub show_rule_management: bool,
     /// The allowlisted rule name being edited (also the update query parameter).
     pub rule_name: &'static str,
     /// The ACE syntax-highlighting mode (`ace/mode/json` or `ace/mode/text`).
@@ -264,6 +312,7 @@ mod tests {
             active_page: "rule_management",
             csrf_token: "csrf".to_owned(),
             show_acl: true,
+            show_rule_management: true,
             rule_name: "body_regex",
             editor_mode: "ace/mode/json",
             content: "<script>alert(1)</script>".to_owned(),
@@ -319,6 +368,7 @@ mod tests {
             active_page: "dashboard",
             csrf_token: "csrf".to_owned(),
             show_acl: true,
+            show_rule_management: true,
         }
         .render()
         .expect("admin dashboard");
@@ -326,11 +376,45 @@ mod tests {
             active_page: "dashboard",
             csrf_token: "csrf".to_owned(),
             show_acl: false,
+            show_rule_management: true,
         }
         .render()
         .expect("operator dashboard");
 
         assert!(admin.contains("Update Kraken UI"));
         assert!(!operator.contains("Update Kraken UI"));
+    }
+
+    #[test]
+    fn auditor_sidebar_drops_rule_management_and_admin_sections() {
+        let auditor = DashboardTemplate {
+            active_page: "dashboard",
+            csrf_token: "csrf".to_owned(),
+            show_acl: false,
+            show_rule_management: false,
+        }
+        .render()
+        .expect("auditor dashboard");
+        let operator = DashboardTemplate {
+            active_page: "dashboard",
+            csrf_token: "csrf".to_owned(),
+            show_acl: false,
+            show_rule_management: true,
+        }
+        .render()
+        .expect("operator dashboard");
+
+        // An auditor keeps only Dashboard, Monitor and User status: no ACL,
+        // Updates or Rule-management entry points appear in their sidebar.
+        assert!(!auditor.contains("Rule management"));
+        assert!(!auditor.contains("Update Kraken UI"));
+        assert!(!auditor.contains(">ACL<"));
+        assert!(auditor.contains("Attacks table"));
+        assert!(auditor.contains("Change password"));
+        assert!(auditor.contains("Two-factor auth"));
+        assert!(auditor.contains("Auditor console"));
+        // The operator, by contrast, still sees the Rule-management section.
+        assert!(operator.contains("Rule management"));
+        assert!(operator.contains("Operator console"));
     }
 }

@@ -30,6 +30,7 @@ pub async fn page(token: CsrfToken) -> Result<Response, AppError> {
         active_page: nav::UPDATES,
         csrf_token: authenticity_token,
         show_acl: true,
+        show_rule_management: true,
         current_version: env!("CARGO_PKG_VERSION"),
     })?;
     Ok((token, response).into_response())

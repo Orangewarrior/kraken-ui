@@ -30,13 +30,17 @@ behind them. For a running list of known gaps and proposed improvements, see
   deleting the row.
 - **Role-based access control.** Every authenticated route sits behind one of
   three middleware guards keyed on the session's operator type: `require_admin`
-  (ACL management), `require_operator` (admin or operator console — including the
-  rule-management CMC controls) and `require_attack_viewer` (admin, operator or
-  auditor — the read-only attack detail view). A session lacking the required role
-  is redirected to the login page, never shown the resource. Sign-in itself is
-  restricted to roles that can use the console: a valid login by a role that
-  cannot (e.g. `auditor`) returns the same generic failure as a wrong password,
-  so it is not a credential oracle.
+  (ACL management and self-update), `require_operator` (admin or operator — the
+  rule-management CMC and regex controls) and `require_console_viewer` (admin,
+  operator or auditor — the read-only console: dashboard, attacks monitor, the
+  attack detail view and self-service account settings). A session lacking the
+  required role is redirected to the login page, never shown the resource. Sign-in
+  itself is restricted to roles that can use the console (`admin`, `operator`,
+  `auditor`): a valid login by any other stored role returns the same generic
+  failure as a wrong password, so it is not a credential oracle. The **auditor**
+  is read-only — it cannot reach rule management, ACL or updates, and the attack
+  detail view masks secret parameter values for it (see
+  *[Sensitive-data redaction](sensitive-data-redaction.md)*).
 - **Sessions cannot outlast their authority.** Each session row carries the
   signed-in operator id. Deleting an operator, or changing their role, revokes
   every live session they hold, so a removed account stops working immediately

@@ -283,6 +283,13 @@ fn is_admin(operator: &Operator) -> bool {
     operator.operator_type == "admin"
 }
 
+/// Whether this operator keeps the Rule-management sidebar section. Every console
+/// role except the read-only auditor does. Two-factor enrollment is self-service
+/// and shared by every role, so the sidebar is the only thing that varies here.
+fn shows_rule_management(operator: &Operator) -> bool {
+    operator.operator_type != "auditor"
+}
+
 async fn render_overview(
     state: &AppState,
     token: CsrfToken,
@@ -295,6 +302,7 @@ async fn render_overview(
         active_page: nav::USER_STATUS,
         csrf_token,
         show_acl: is_admin(operator),
+        show_rule_management: shows_rule_management(operator),
         enabled: status.enabled,
         remaining_recovery_codes: status.remaining_recovery_codes,
         show_enroll: false,
@@ -323,6 +331,7 @@ fn render_enroll(
         active_page: nav::USER_STATUS,
         csrf_token,
         show_acl: is_admin(operator),
+        show_rule_management: shows_rule_management(operator),
         enabled: false,
         remaining_recovery_codes: 0,
         show_enroll: true,
@@ -351,6 +360,7 @@ fn render_recovery(
         active_page: nav::USER_STATUS,
         csrf_token,
         show_acl: is_admin(operator),
+        show_rule_management: shows_rule_management(operator),
         enabled: true,
         remaining_recovery_codes: recovery_codes.len() as u64,
         show_enroll: false,
