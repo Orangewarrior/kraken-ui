@@ -42,6 +42,8 @@ const NONCE_BYTES: usize = 64;
 
 const LIST_PATH: &str = "/rule/control/cmc/list";
 const UPDATE_PATH: &str = "/rule/control/cmc/update";
+const REGEX_VIEW_PATH: &str = "/rule/control/regex/view";
+const REGEX_UPDATE_PREFIX: &str = "/rule/control/regex/update/";
 
 /// A configured client for the KrakenWAF rule-management endpoint.
 #[derive(Clone)]
@@ -88,6 +90,30 @@ struct CmcListModules {
 #[derive(Serialize)]
 struct CmcUpdateRequest {
     modules: CmcUpdateModules,
+}
+
+/// Body sent to `/rule/control/regex/view` to retrieve a rule file's content.
+#[derive(Serialize)]
+struct RegexViewRequest<'a> {
+    rule_view: &'a str,
+}
+
+/// Response from `/rule/control/regex/view`: the rule file read into one string.
+#[derive(Deserialize)]
+struct RegexViewResponse {
+    #[serde(default)]
+    content: String,
+}
+
+/// Outcome reported by KrakenWAF after a regex update, echoed back to the UI.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct RegexUpdateOutcome {
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub rule: String,
+    #[serde(default)]
+    pub rules_written: u64,
 }
 
 #[derive(Serialize)]
@@ -228,6 +254,61 @@ impl RuleManagementService {
         // A success status with an unexpected/empty body still counts: the change
         // was applied. Default the outcome rather than failing the operator's
         // request over a cosmetic response-shape mismatch.
+        Ok(response.json().await.unwrap_or_default())
+    }
+
+    /// Fetches the full content of one regex rule file. `rule` must already be a
+    /// validated, allowlisted rule name (see [`crate::services::regex_rules`]):
+    /// it is sent verbatim in the `rule_view` body, never built into a path.
+    pub async fn view_regex(&self, rule: &str) -> anyhow::Result<String> {
+        let url = format!("{}{REGEX_VIEW_PATH}", self.endpoint);
+        let body = serde_json::to_vec(&RegexViewRequest { rule_view: rule })
+            .context("failed to encode the regex view body")?;
+        let authorization = self.rorschach_token("POST", REGEX_VIEW_PATH, &body)?;
+        let response = self
+            .client
+            .post(&url)
+            .header(AUTHORIZATION, authorization)
+            .header(CONTENT_TYPE, "application/json")
+            .header(ACCEPT, "application/json")
+            .body(body)
+            .send()
+            .await
+            .context("failed to reach the WAF regex view endpoint")?;
+        if !response.status().is_success() {
+            bail!("WAF regex view returned HTTP {}", response.status());
+        }
+        let payload: RegexViewResponse = response
+            .json()
+            .await
+            .context("invalid JSON from the WAF regex view endpoint")?;
+        Ok(payload.content)
+    }
+
+    /// Replaces a regex rule file's content. `rule` is an allowlisted name that
+    /// forms the trailing path segment; `body` is the already-validated wire body
+    /// produced by the matching codec, and the Rorschach token binds it.
+    pub async fn update_regex(
+        &self,
+        rule: &str,
+        body: Vec<u8>,
+    ) -> anyhow::Result<RegexUpdateOutcome> {
+        let path = format!("{REGEX_UPDATE_PREFIX}{rule}");
+        let url = format!("{}{path}", self.endpoint);
+        let authorization = self.rorschach_token("POST", &path, &body)?;
+        let response = self
+            .client
+            .post(&url)
+            .header(AUTHORIZATION, authorization)
+            .header(CONTENT_TYPE, "application/json")
+            .header(ACCEPT, "application/json")
+            .body(body)
+            .send()
+            .await
+            .context("failed to reach the WAF regex update endpoint")?;
+        if !response.status().is_success() {
+            bail!("WAF regex update returned HTTP {}", response.status());
+        }
         Ok(response.json().await.unwrap_or_default())
     }
 
@@ -408,6 +489,24 @@ mod tests {
             json,
             r#"{"modules":{"CMC-Rules":{"HPP_detect":false,"Silent_sql_errors":false}}}"#
         );
+    }
+
+    #[test]
+    fn regex_view_body_matches_the_documented_shape() {
+        let json = serde_json::to_string(&RegexViewRequest {
+            rule_view: "header_regex",
+        })
+        .expect("serialise");
+        assert_eq!(json, r#"{"rule_view":"header_regex"}"#);
+    }
+
+    #[test]
+    fn regex_view_response_extracts_the_content_field() {
+        let payload: RegexViewResponse = serde_json::from_str(
+            r#"{"status":"ok","context":"regex_view","rule":"body_regex","content":"{\n}\n"}"#,
+        )
+        .expect("parse view");
+        assert_eq!(payload.content, "{\n}\n");
     }
 
     #[test]

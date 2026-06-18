@@ -2120,3 +2120,60 @@ tr:last-child td {
 .waf-tok-string { color: #0a3069; }
 .waf-tok-number { color: #cf222e; }
 .waf-tok-keyword { color: #8250df; font-weight: 700; }
+
+/* ----- Regex rule editor (ACE) ----- */
+/* Inline styles are blocked under the strict CSP, so the editor host gets its
+   geometry here. ACE absolutely-positions its layers, so an explicit height is
+   required for the editor to render. */
+.ace-editor-host {
+  position: relative;
+  width: 100%;
+  min-height: 420px;
+  height: 60vh;
+  margin: 0.4rem 0 0.2rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.stacked-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  align-items: flex-start;
+}
+
+.stacked-form select {
+  min-width: 16rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+
+/* The mandatory ReDoS / PCRE caution shown under every regex editor. */
+.regex-warning {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.regex-warning-alert {
+  margin: 0;
+  padding: 0.8rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--warning);
+  background: rgba(255, 176, 32, 0.14);
+  color: var(--warning);
+  font-weight: 700;
+}
+
+.regex-warning-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}

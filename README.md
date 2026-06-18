@@ -2,7 +2,7 @@
 
 > The secure-by-default admin console for [KrakenWAF](https://github.com/Orangewarrior/KrakenWaf) — built in Rust.
 
-**Current version: 0.17.0**
+**Current version: 0.18.0**
 
 Kraken UI is a small, hardened web application for operating a KrakenWAF
 deployment: manage operators, watch blocked attacks in real time, and read live
@@ -31,7 +31,11 @@ inline JavaScript.
   KrakenWAF CMC detection modules at runtime from the **Rule management → CMC
   rules** menu. The UI proxies to KrakenWAF's rule-management API and authenticates
   each request with a per-request *Rorschach* token (a time-windowed BLAKE2b-256
-  keyed MAC), so the browser never holds a secret. See
+  keyed MAC), so the browser never holds a secret. From **Rule management → Regex
+  rules** they can also view and replace the content of the regex and keyword rule
+  files (`body_regex`, `path_regex`, `header_regex`, `vectorscan_list`,
+  `scanners`) in a syntax-highlighting editor; each submission is validated for
+  its rule shape before it reaches the WAF. See
   [docs/rule-management.md](docs/rule-management.md).
 - **Admin-controlled stable updates.** Administrators can download, validate,
   compile and install the latest published Kraken UI release from the Updates
@@ -161,7 +165,7 @@ Then sign in at `https://host:port/kraken_ui/login`.
 | Dashboard   | `/kraken_ui/auth/admin_panel`, `/kraken_ui/auth/dashboard` |
 | Operators   | `/kraken_ui/auth/insert_user`, `/delete_user`, `/edit_user`, `/show_user_table` |
 | Monitoring  | `/kraken_ui/auth/show_attacks`, `/kraken_ui/auth/view_waf_request/?id=<id>` |
-| Rule management | `/kraken_ui/auth/rule_management/cmc`, `/kraken_ui/auth/api/rule_management/cmc`, `/kraken_ui/auth/rule_management/cmc/update` |
+| Rule management | `/kraken_ui/auth/rule_management/cmc`, `/kraken_ui/auth/api/rule_management/cmc`, `/kraken_ui/auth/rule_management/cmc/update`, `/kraken_ui/auth/rule_management/regex`, `/kraken_ui/auth/rule_management/regex/edit`, `/kraken_ui/auth/rule_management/regex/update` |
 | Account     | `/kraken_ui/auth/update_password`, `/kraken_ui/auth/mfa` |
 | Updates     | `/kraken_ui/auth/update_kraken_ui` (administrators only) |
 | Two-factor  | `/kraken_ui/auth/mfa_challenge`, `/kraken_ui/auth/mfa_verify` (sign-in challenge) |

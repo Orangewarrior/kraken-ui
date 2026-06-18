@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>KrakenWAF - Regex rules</title><link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script></head>
+<body data-page="rule-management"><div class="shell admin-shell">{% include "admin_sidebar.html" %}<main class="page admin-content">
+  <section class="page-hero compact-hero"><span class="badge">Rule management</span><h1>Rule editor</h1><p class="lead">Choose a regex rule list to view and edit its content. The rule file is fetched from KrakenWAF and written back through the rule-management channel.</p></section>
+  {% if configured %}
+  <section class="panel">
+    <form class="stacked-form" method="get" action="/kraken_ui/auth/rule_management/regex/edit">
+      <label for="rule-select">Choice a rule list: </label>
+      <select id="rule-select" name="rule" required>
+        {% for name in rule_lists %}<option value="{{ name }}">{{ name }}</option>
+        {% endfor %}
+      </select>
+      <div class="table-footer"><button type="submit" class="ghost-button">submit rule to edit</button></div>
+    </form>
+  </section>
+  {% else %}<section class="panel"><p class="form-message error">Rule management is not configured. Set <code>waf-rule-endpoint</code> in <code>conf/setup.yaml</code> and provision the <code>RORSCHACH_SECRET_EVEN</code> and <code>RORSCHACH_SECRET_ODD</code> secrets (see <code>docs/rule-management.md</code>).</p></section>{% endif %}
+</main></div></body></html>

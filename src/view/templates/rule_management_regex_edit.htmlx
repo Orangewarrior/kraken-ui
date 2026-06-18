@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>KrakenWAF - Edit {{ rule_name }}</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/vendor/ace/ace.css">
+<link rel="stylesheet" href="/static/vendor/ace/theme-clouds_midnight.css">
+<script src="/static/app.js" defer></script>
+{% if loaded %}<script src="/static/vendor/ace/ace.js" defer></script>
+<script src="/static/vendor/ace/mode-json.js" defer></script>
+<script src="/static/vendor/ace/theme-clouds_midnight.js" defer></script>
+<script src="/static/vendor/ace/ext-spellcheck.js" defer></script>
+<script src="/static/regex_editor.js" defer></script>{% endif %}</head>
+<body data-page="rule-management"><div class="shell admin-shell">{% include "admin_sidebar.html" %}<main class="page admin-content">
+  <section class="page-hero compact-hero"><span class="badge">Rule management</span><h1>Rule editor</h1><p class="lead">Editing <code>{{ rule_name }}</code>. Make your changes and choose Update rule to write them back to KrakenWAF.</p></section>
+  {% if loaded %}
+  <section class="panel">
+    <p class="form-message" data-regex-status role="status" aria-live="polite" hidden></p>
+    <textarea id="rule-source" hidden aria-hidden="true">{{ content }}</textarea>
+    <div id="rule-editor" class="ace-editor-host" data-ace-editor data-editor-mode="{{ editor_mode }}" data-update-url="/kraken_ui/auth/rule_management/regex/update?rule={{ rule_name }}" data-csrf-token="{{ csrf_token }}"></div>
+    <div class="table-footer"><button type="button" class="ghost-button" data-regex-submit>Update rule</button></div>
+    <div class="regex-warning" role="note">
+      <p class="regex-warning-alert">When you write a rule with regex, take care with ReDOS, and remember PCRE type regex is dangerous because anyone can inject a eval evil resources.</p>
+      <p class="regex-warning-note">The KrakenWAF developers are not responsible for any misuse of regular expressions. We believe a direct DFA is better than an NFA-&gt;DFA (which is what regex is), and we think that creating CMC modules is something superior to regex rules.</p>
+    </div>
+  </section>
+  {% else %}
+  <section class="panel"><p class="form-message error">{{ error_message }}</p><p><a href="/kraken_ui/auth/rule_management/regex">Back to rule selection</a></p></section>
+  {% endif %}
+</main></div></body></html>

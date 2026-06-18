@@ -15,3 +15,10 @@ These licenses are explicitly listed in `deny.toml`; unknown registries, Git
 dependencies, wildcard versions, yanked crates and security advisories remain
 blocked. Removing these exceptions would require replacing at least one
 mandatory framework or security library.
+
+## Vendored frontend assets
+
+Kraken UI ships no CDN assets; the only third-party browser code is the
+[ACE](https://ace.c9.io/) editor used by the regex rule editor, vendored under
+`src/view/static/vendor/ace`. ACE is distributed under the **BSD 3-Clause**
+license; its `LICENSE` file is kept alongside the vendored build.

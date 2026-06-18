@@ -68,6 +68,20 @@ pub fn create(state: AppState) -> Router {
             "/kraken_ui/auth/rule_management/cmc/update",
             post(rule_management::cmc_update),
         )
+        // Regex rule editor: pick a rule list, view its content fetched from
+        // KrakenWAF, edit it and push the update back. Admins and operators only.
+        .route(
+            "/kraken_ui/auth/rule_management/regex",
+            get(rule_management::regex_select_page),
+        )
+        .route(
+            "/kraken_ui/auth/rule_management/regex/edit",
+            get(rule_management::regex_edit_page),
+        )
+        .route(
+            "/kraken_ui/auth/rule_management/regex/update",
+            post(rule_management::regex_update),
+        )
         .route("/kraken_ui/auth/update_password", get(acl::update_password))
         .route(
             "/kraken_ui/auth/update_password_action",

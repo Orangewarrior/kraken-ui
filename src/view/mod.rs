@@ -166,6 +166,39 @@ pub struct RuleManagementCmcTemplate {
 }
 
 #[derive(Template)]
+#[template(path = "rule_management_regex_select.htmlx", escape = "html")]
+pub struct RuleManagementRegexSelectTemplate {
+    pub active_page: &'static str,
+    pub csrf_token: String,
+    pub show_acl: bool,
+    /// Whether the rule-management channel is configured; when `false` the page
+    /// explains what to set instead of rendering the form.
+    pub configured: bool,
+    /// The allowlisted rule-list names shown in the select box.
+    pub rule_lists: Vec<&'static str>,
+}
+
+#[derive(Template)]
+#[template(path = "rule_management_regex_edit.htmlx", escape = "html")]
+pub struct RuleManagementRegexEditTemplate {
+    pub active_page: &'static str,
+    pub csrf_token: String,
+    pub show_acl: bool,
+    /// The allowlisted rule name being edited (also the update query parameter).
+    pub rule_name: &'static str,
+    /// The ACE syntax-highlighting mode (`ace/mode/json` or `ace/mode/text`).
+    pub editor_mode: &'static str,
+    /// The current rule content fetched from KrakenWAF, rendered through the
+    /// template's HTML escaping and read back by ACE via the textarea `value`.
+    pub content: String,
+    /// `true` when the content was fetched successfully and the editor should
+    /// render; `false` when `error_message` explains why it could not.
+    pub loaded: bool,
+    /// A non-empty, operator-facing message shown in an error banner.
+    pub error_message: String,
+}
+
+#[derive(Template)]
 #[template(path = "view_waf_request.htmlx", escape = "html")]
 pub struct ViewWafRequestTemplate {
     pub attack_id: i32,
@@ -223,7 +256,32 @@ pub fn csrf_error_response() -> Response {
 mod tests {
     use askama::Template;
 
-    use super::{DashboardTemplate, ViewWafRequestTemplate};
+    use super::{DashboardTemplate, RuleManagementRegexEditTemplate, ViewWafRequestTemplate};
+
+    #[test]
+    fn regex_editor_escapes_rule_content_and_shows_the_caution() {
+        let html = RuleManagementRegexEditTemplate {
+            active_page: "rule_management",
+            csrf_token: "csrf".to_owned(),
+            show_acl: true,
+            rule_name: "body_regex",
+            editor_mode: "ace/mode/json",
+            content: "<script>alert(1)</script>".to_owned(),
+            loaded: true,
+            error_message: String::new(),
+        }
+        .render()
+        .expect("regex editor must render");
+
+        // Rule content is inert text in the source textarea, never live markup.
+        assert!(html.contains("&#60;script&#62;alert(1)&#60;/script&#62;"));
+        assert!(!html.contains("<script>alert(1)</script>"));
+        // The mandatory ReDoS / PCRE caution is always present on the editor.
+        assert!(html.contains("take care with ReDOS"));
+        assert!(html.contains("CMC modules is something superior"));
+        // ACE is loaded from the strict-CSP, same-origin vendor bundle.
+        assert!(html.contains("/static/vendor/ace/ace.js"));
+    }
 
     #[test]
     fn escapes_attacker_controlled_request_payload() {
