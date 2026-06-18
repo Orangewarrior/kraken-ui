@@ -51,6 +51,7 @@ pub async fn show_attacks(
         active_page: nav::MONITOR,
         csrf_token,
         show_acl: auth::is_admin(&session).await?,
+        show_rule_management: !auth::is_auditor(&session).await?,
         database_available: state.waf_database.is_some(),
     })?;
     Ok((token, response).into_response())

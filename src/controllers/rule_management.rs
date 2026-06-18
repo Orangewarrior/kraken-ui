@@ -75,6 +75,9 @@ pub async fn cmc_page(
         active_page: nav::RULE_MANAGEMENT,
         csrf_token,
         show_acl: auth::is_admin(&session).await?,
+        // Rule management is itself an operator/admin-only surface, so a viewer
+        // who can reach this page always keeps the sidebar section.
+        show_rule_management: true,
         configured: state.rule_management.is_some(),
     })?;
     Ok((token, response).into_response())
@@ -196,6 +199,9 @@ pub async fn regex_select_page(
         active_page: nav::RULE_MANAGEMENT,
         csrf_token,
         show_acl: auth::is_admin(&session).await?,
+        // Rule management is itself an operator/admin-only surface, so a viewer
+        // who can reach this page always keeps the sidebar section.
+        show_rule_management: true,
         configured: state.rule_management.is_some(),
         rule_lists,
     })?;
@@ -238,6 +244,9 @@ pub async fn regex_edit_page(
         active_page: nav::RULE_MANAGEMENT,
         csrf_token,
         show_acl: auth::is_admin(&session).await?,
+        // Rule management is itself an operator/admin-only surface, so a viewer
+        // who can reach this page always keeps the sidebar section.
+        show_rule_management: true,
         rule_name: list.as_str(),
         editor_mode: list.editor_mode(),
         content,

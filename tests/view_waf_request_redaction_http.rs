@@ -7,9 +7,9 @@
 //! then drives the page end to end with `reqwest`:
 //!
 //!   * an **administrator** sees the captured bytes in clear, and
-//!   * an **operator** (standing in for every non-admin role, including the
-//!     reserved `auditor`) sees every secret value replaced with `+++++`, while
-//!     non-sensitive parameters stay visible.
+//!   * an **operator** and an **auditor** (every non-admin console role) see every
+//!     secret value replaced with `+++++`, while non-sensitive parameters stay
+//!     visible.
 //!
 //! The UI router is served over plain HTTP (TLS is added by `main` in
 //! production), so cookies are managed by hand rather than through reqwest's jar,
@@ -36,6 +36,7 @@ use kraken_ui::{
 
 const ADMIN_PASSWORD: &str = "Reliable-Console9Key";
 const OPERATOR_PASSWORD: &str = "Operator-Console9Key";
+const AUDITOR_PASSWORD: &str = "Watchful-Ledger4Read";
 const SESSION_COOKIE: &str = "__Host-kraken_session";
 const CSRF_COOKIE: &str = "__Host-kraken_csrf";
 
@@ -233,7 +234,8 @@ async fn view_waf_request_masks_secrets_for_non_admins_only() {
     let ui_database = database::connect(&config.database_path)
         .await
         .expect("UI database connection");
-    OperatorRepository::new(ui_database, crypto)
+    let operator_repository = OperatorRepository::new(ui_database, crypto);
+    operator_repository
         .create(NewOperator {
             username: "operator1",
             email: "operator1@example.invalid",
@@ -242,6 +244,15 @@ async fn view_waf_request_masks_secrets_for_non_admins_only() {
         })
         .await
         .expect("create operator");
+    operator_repository
+        .create(NewOperator {
+            username: "auditor1",
+            email: "auditor1@example.invalid",
+            operator_type: "auditor",
+            password: AUDITOR_PASSWORD,
+        })
+        .await
+        .expect("create auditor");
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -326,5 +337,40 @@ async fn view_waf_request_masks_secrets_for_non_admins_only() {
     assert!(
         operator_html.contains(VISIBLE_USER),
         "non-sensitive parameters must remain visible to the operator"
+    );
+
+    // 3. The auditor — a first-class read-only console role — also sees every
+    //    secret value masked, exactly as the operator does.
+    let auditor_session = login(&client, &base, "auditor1", AUDITOR_PASSWORD).await;
+    let auditor_page = client
+        .get(&detail_url)
+        .header(
+            header::COOKIE,
+            format!("{SESSION_COOKIE}={auditor_session}"),
+        )
+        .send()
+        .await
+        .expect("auditor detail page");
+    assert_eq!(auditor_page.status(), reqwest::StatusCode::OK);
+    let auditor_html = auditor_page.text().await.expect("auditor html");
+    assert!(
+        auditor_html.contains("+++++"),
+        "the auditor must see masked values"
+    );
+    assert!(
+        !auditor_html.contains(SECRET_PASSWORD),
+        "the password value must not leak to the auditor"
+    );
+    assert!(
+        !auditor_html.contains(SECRET_TOKEN),
+        "the token value must not leak to the auditor"
+    );
+    assert!(
+        !auditor_html.contains(SECRET_SENHA),
+        "the senha value must not leak to the auditor"
+    );
+    assert!(
+        auditor_html.contains(VISIBLE_USER),
+        "non-sensitive parameters must remain visible to the auditor"
     );
 }

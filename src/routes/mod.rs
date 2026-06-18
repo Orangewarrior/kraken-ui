@@ -8,7 +8,7 @@ use tower_http::services::ServeDir;
 
 use crate::{
     controllers::{acl, auth, dashboard, health, mfa, rule_management, setup, update, waf},
-    middleware::authentication::{require_admin, require_attack_viewer, require_operator},
+    middleware::authentication::{require_admin, require_console_viewer, require_operator},
     state::AppState,
 };
 
@@ -45,17 +45,10 @@ pub fn create(state: AppState) -> Router {
         .route("/kraken_ui/auth/api/update_kraken_ui", get(update::status))
         .route_layer(middleware::from_fn(require_admin));
 
-    // Day-to-day console routes shared by administrators and operators. The
-    // sidebar drops the ACL section for operators, but the dashboard, attacks
-    // table and self-service password change are identical.
+    // Operator-grade routes: rule management. Open to administrators and operators
+    // but not auditors, whose remit is read-only.
     let operator_routes = Router::new()
-        .route("/kraken_ui/auth/admin_panel", get(dashboard::get))
-        .route("/kraken_ui/auth/dashboard", get(dashboard::get))
-        .route("/kraken_ui/auth/api/dashboard", get(dashboard::api))
-        .route("/kraken_ui/auth/show_attacks", get(waf::show_attacks))
-        .route("/kraken_ui/auth/api/attacks", get(waf::api_attacks))
-        // Rule management: list and apply CMC detection-module toggles. Open to
-        // administrators and operators alike (this is part of operator_routes).
+        // Rule management: list and apply CMC detection-module toggles.
         .route(
             "/kraken_ui/auth/rule_management/cmc",
             get(rule_management::cmc_page),
@@ -69,7 +62,7 @@ pub fn create(state: AppState) -> Router {
             post(rule_management::cmc_update),
         )
         // Regex rule editor: pick a rule list, view its content fetched from
-        // KrakenWAF, edit it and push the update back. Admins and operators only.
+        // KrakenWAF, edit it and push the update back.
         .route(
             "/kraken_ui/auth/rule_management/regex",
             get(rule_management::regex_select_page),
@@ -82,12 +75,29 @@ pub fn create(state: AppState) -> Router {
             "/kraken_ui/auth/rule_management/regex/update",
             post(rule_management::regex_update),
         )
+        .route_layer(middleware::from_fn(require_operator));
+
+    // The read-only console surface shared by administrators, operators and
+    // auditors: dashboard, attacks monitor (table and single-attack detail) and
+    // self-service account settings (password and two-factor) plus logout. The
+    // sidebar drops the ACL, Updates and Rule-management sections for the roles
+    // that cannot use them, but these pages are identical for every viewer.
+    let console_routes = Router::new()
+        .route("/kraken_ui/auth/admin_panel", get(dashboard::get))
+        .route("/kraken_ui/auth/dashboard", get(dashboard::get))
+        .route("/kraken_ui/auth/api/dashboard", get(dashboard::api))
+        .route("/kraken_ui/auth/show_attacks", get(waf::show_attacks))
+        .route("/kraken_ui/auth/api/attacks", get(waf::api_attacks))
+        .route(
+            "/kraken_ui/auth/view_waf_request/",
+            get(waf::view_waf_request),
+        )
         .route("/kraken_ui/auth/update_password", get(acl::update_password))
         .route(
             "/kraken_ui/auth/update_password_action",
             post(acl::update_password_action),
         )
-        // Self-service two-factor management, open to admins and operators alike.
+        // Self-service two-factor management, open to every console role.
         .route("/kraken_ui/auth/mfa", get(mfa::mfa_overview))
         .route(
             "/kraken_ui/auth/mfa_enroll",
@@ -97,15 +107,7 @@ pub fn create(state: AppState) -> Router {
         .route("/kraken_ui/auth/mfa_disable", post(mfa::mfa_disable))
         .route("/kraken_ui/auth/mfa_regenerate", post(mfa::mfa_regenerate))
         .route("/kraken_ui/auth/logout", post(auth::logout))
-        .route_layer(middleware::from_fn(require_operator));
-
-    // The single-attack detail view is also available to auditors.
-    let attack_view_routes = Router::new()
-        .route(
-            "/kraken_ui/auth/view_waf_request/",
-            get(waf::view_waf_request),
-        )
-        .route_layer(middleware::from_fn(require_attack_viewer));
+        .route_layer(middleware::from_fn(require_console_viewer));
 
     Router::new()
         .route("/", get(|| async { Redirect::to("/kraken_ui/login") }))
@@ -130,6 +132,6 @@ pub fn create(state: AppState) -> Router {
         .nest_service("/static", ServeDir::new(static_assets_dir))
         .merge(admin_routes)
         .merge(operator_routes)
-        .merge(attack_view_routes)
+        .merge(console_routes)
         .with_state(state)
 }

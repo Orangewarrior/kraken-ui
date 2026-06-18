@@ -59,13 +59,22 @@ pub struct MfaCodeForm {
 }
 
 pub async fn login_page(token: CsrfToken, session: Session) -> Result<Response, AppError> {
-    if matches!(
-        authenticated_operator_type(&session).await?.as_deref(),
-        Some("admin") | Some("operator")
-    ) {
+    if authenticated_operator_type(&session)
+        .await?
+        .as_deref()
+        .is_some_and(is_console_role)
+    {
         return Ok(Redirect::to("/kraken_ui/auth/admin_panel").into_response());
     }
     login_response(token, "").await
+}
+
+/// Whether `operator_type` may hold an interactive console session. Administrators
+/// and operators get the full console; auditors get a read-only subset (dashboard,
+/// attacks monitor and their own account settings). Any other stored role — even
+/// with valid credentials — is refused at sign-in.
+pub fn is_console_role(operator_type: &str) -> bool {
+    matches!(operator_type, "admin" | "operator" | "auditor")
 }
 
 pub async fn login_submit(
@@ -147,9 +156,9 @@ pub async fn login_submit(
             .update_encrypted_password(operator.id_user, replacement_record)
             .await?;
     }
-    if !matches!(operator.operator_type.as_str(), "admin" | "operator") {
-        // Do not reveal that valid credentials exist for roles that cannot use
-        // the console (e.g. auditor): return the same generic failure response.
+    if !is_console_role(&operator.operator_type) {
+        // Do not reveal that valid credentials exist for roles that cannot use the
+        // console: return the same generic failure response a wrong password gets.
         audit_login(&client_ip, &username, "forbidden_role");
         return invalid_login_response(token).await;
     }
@@ -248,7 +257,7 @@ pub async fn mfa_verify(
 
     // Re-check the role at finalisation, exactly as the password path does, in
     // case it changed while the challenge was outstanding.
-    if !matches!(operator.operator_type.as_str(), "admin" | "operator") {
+    if !is_console_role(&operator.operator_type) {
         audit_login(&client_ip, &operator.username, "forbidden_role");
         let _ = session.flush().await;
         return Ok(Redirect::to("/kraken_ui/login").into_response());
@@ -388,6 +397,14 @@ pub async fn is_admin(session: &Session) -> Result<bool, AppError> {
     Ok(authenticated_operator_type(session).await?.as_deref() == Some("admin"))
 }
 
+/// Whether the current session belongs to an auditor. Auditors get a deliberately
+/// narrow console — dashboard, attacks monitor and their own account settings — so
+/// controllers use this to hide the rule-management section of the sidebar (the
+/// routes behind it stay guarded server-side regardless).
+pub async fn is_auditor(session: &Session) -> Result<bool, AppError> {
+    Ok(authenticated_operator_type(session).await?.as_deref() == Some("auditor"))
+}
+
 pub async fn authenticated_username(session: &Session) -> Option<String> {
     session.get::<String>(AUTHENTICATED_USERNAME).await.ok()?
 }
@@ -483,4 +500,24 @@ async fn login_response(token: CsrfToken, error_message: &str) -> Result<Respons
         error_message,
     })?;
     Ok((token, response).into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_console_role;
+
+    #[test]
+    fn admin_operator_and_auditor_may_hold_a_console_session() {
+        assert!(is_console_role("admin"));
+        assert!(is_console_role("operator"));
+        assert!(is_console_role("auditor"));
+    }
+
+    #[test]
+    fn unknown_or_future_roles_are_refused_at_sign_in() {
+        assert!(!is_console_role("viewer"));
+        assert!(!is_console_role("Auditor")); // the stored value is lower-cased
+        assert!(!is_console_role(""));
+        assert!(!is_console_role("administrator"));
+    }
 }

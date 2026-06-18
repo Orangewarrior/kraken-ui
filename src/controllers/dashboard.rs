@@ -44,6 +44,7 @@ pub async fn get(token: CsrfToken, session: Session) -> Result<Response, AppErro
         active_page: nav::DASHBOARD,
         csrf_token: authenticity_token,
         show_acl: auth::is_admin(&session).await?,
+        show_rule_management: !auth::is_auditor(&session).await?,
     })?;
     Ok((token, response).into_response())
 }

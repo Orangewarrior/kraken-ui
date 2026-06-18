@@ -32,7 +32,7 @@ rule match, rule line match and client IP — is shown unchanged to every viewer
 |------|--------------------|
 | `admin` | **Yes** — the original captured bytes, unmodified. |
 | `operator` | No — secret values replaced with `+++++`. |
-| `auditor` | No — secret values replaced with `+++++`. (Sign-in for `auditor` is reserved; the guard already covers it.) |
+| `auditor` | No — secret values replaced with `+++++`. The auditor can sign in and open the attack detail view, but every secret parameter value is masked. |
 
 The decision is made server-side in `view_waf_request` from the session's
 operator type (`auth::is_admin`); the masked bytes never leave the server for a

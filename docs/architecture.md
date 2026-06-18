@@ -115,15 +115,21 @@ shared `guard` that checks the session's operator type against an allow-list:
 
 | Middleware | Allowed roles | Protects |
 |------------|---------------|----------|
-| `require_admin` | `admin` | The ACL management surface (add/edit/delete/list operators). |
-| `require_operator` | `admin`, `operator` | The day-to-day console: dashboard, attacks table, self-service password change, logout. |
-| `require_attack_viewer` | `admin`, `operator`, `auditor` | The single-attack detail view only. |
+| `require_admin` | `admin` | The ACL management surface (add/edit/delete/list operators) and the self-update flow. |
+| `require_operator` | `admin`, `operator` | Rule management (CMC toggles and the regex editor). |
+| `require_console_viewer` | `admin`, `operator`, `auditor` | The read-only console surface: dashboard, attacks monitor (table **and** single-attack detail), self-service password and two-factor pages, and logout. |
 
-The same dashboard, attacks and password-change controllers serve both admins
-and operators; the controller computes `show_acl` (`auth::is_admin`) and passes
-it to the template, which renders the ACL sidebar section only for admins. Today
-only `admin` and `operator` accounts can sign in — the `auditor` role is already
-authorised for the read-only detail view for forward compatibility.
+The same dashboard, attacks and account controllers serve every role; each
+controller computes `show_acl` (`auth::is_admin`) and `show_rule_management`
+(`!auth::is_auditor`) and passes them to the template, which renders the ACL and
+Updates sidebar sections only for admins and the Rule-management section only for
+admins and operators. All three roles — `admin`, `operator` and `auditor` — can
+sign in. The **auditor** is a read-only role: it gets the dashboard, the attacks
+monitor (where secret parameter values are masked in the detail view) and its own
+account settings (password and two-factor), but no rule management, ACL or
+updates. Any other stored role, even with valid credentials, is refused at
+sign-in (`auth::is_console_role`), returning the same generic failure as a wrong
+password so it is not a credential oracle.
 
 ## The single-attack detail view
 

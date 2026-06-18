@@ -2,6 +2,52 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.19.0 - 2026-06-18
+
+### Added
+
+- **Auditor sign-in (read-only console role).** The `auditor` role — previously a
+  reserved type that could be created but not used — is now a first-class console
+  identity. An auditor can sign in (including through the two-factor challenge) and
+  reaches a deliberately narrow surface: the **Dashboard**, the **Monitor** (the
+  attacks table and the single-attack detail view, where they can open an incident
+  and inspect its request/response evidence), their own **User status** page
+  (change password, manage two-factor) and **Logout**. The sidebar drops the ACL,
+  Updates and Rule-management sections for auditors, driven by a new
+  `show_rule_management` template flag (`!auth::is_auditor`).
+- **Secret masking for auditors on the attack detail view.** As with operators, an
+  auditor opening an incident never sees secret parameter values: any value of a
+  parameter named after a well-known secret (`password`, `key`, `secret`, `token`,
+  `senha`, …) is replaced with `+++++` server-side before the page is rendered.
+  Only an administrator sees the captured bytes in clear.
+
+### Changed
+
+- **Route authorization regrouped.** The console middleware now reflects three
+  surfaces: `require_admin` (ACL and self-update), `require_operator` (rule
+  management — admins and operators only) and the new `require_console_viewer`
+  (admin, operator **and** auditor — dashboard, attacks monitor, the attack detail
+  view, and self-service password and two-factor pages, plus logout). The former
+  `require_attack_viewer` guard is folded into `require_console_viewer`.
+- Sign-in eligibility is now centralized in `auth::is_console_role`
+  (`admin | operator | auditor`); any other stored role is still refused with the
+  same generic failure a wrong password gets, so it is not a credential oracle.
+
+### Tests
+
+- Added `tests/auditor_console_access_http.rs`: a real-HTTP test that signs in as
+  an auditor and pins the boundary — the dashboard, attacks table, attack detail
+  view and account pages render, while every ACL, Updates and Rule-management route
+  is redirected to login.
+- Added `examples/auditor_access_probe.rs`: a standalone `reqwest` probe that signs
+  in to a running instance as an auditor and reports, route by route, whether the
+  read-only boundary holds (exits non-zero on any violation).
+- Extended `tests/view_waf_request_redaction_http.rs` to drive a real auditor
+  session and assert secret values are masked for it, and updated
+  `tests/regex_rule_management_http.rs` to assert an auditor now signs in but is
+  still blocked from the regex editor server-side.
+- Added unit tests for `auth::is_console_role` and the auditor sidebar rendering.
+
 ## 0.18.1 - 2026-06-18
 
 ### Fixed

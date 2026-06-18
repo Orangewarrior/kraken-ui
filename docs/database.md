@@ -107,21 +107,37 @@ The full ACL management surface.
 | POST | `/update_user_action` | Update an operator |
 | GET  | `/show_user_table` | Operators table |
 | GET  | `/api/operators` | Operators JSON (paginated) |
+| GET  | `/update_kraken_ui` | Stable source update page |
+| POST | `/update_kraken_ui/start` | Start a source update |
+| GET  | `/api/update_kraken_ui` | Read update status |
 
 ### Administrator or operator (`require_operator`)
 
-The day-to-day console. For operators the sidebar drops the ACL section; the
-pages themselves are identical.
+Rule management. Not available to auditors, whose remit is read-only.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET  | `/rule_management/cmc` | CMC detection-module toggles |
+| GET  | `/api/rule_management/cmc` | CMC modules JSON |
+| POST | `/rule_management/cmc/update` | Apply a CMC toggle |
+| GET  | `/rule_management/regex` | Regex rule-list picker |
+| GET  | `/rule_management/regex/edit` | Regex rule editor |
+| POST | `/rule_management/regex/update` | Push an edited regex rule |
+
+### Administrator, operator or auditor (`require_console_viewer`)
+
+The read-only console surface. For operators the sidebar drops the ACL and
+Updates sections; for auditors it additionally drops Rule management. The pages
+themselves are identical, except that the single-attack detail view masks secret
+parameter values for everyone but an administrator.
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET  | `/admin_panel`, `/dashboard` | Dashboard view |
 | GET  | `/api/dashboard` | Dashboard JSON metrics |
-| GET  | `/update_kraken_ui` | Admin-only stable source update page |
-| POST | `/update_kraken_ui/start` | Start an admin-only source update |
-| GET  | `/api/update_kraken_ui` | Read admin-only update status |
 | GET  | `/show_attacks` | Observed-attacks table |
 | GET  | `/api/attacks` | Attacks JSON (paginated) |
+| GET  | `/view_waf_request/?id=<id>` | Single WAF finding detail (new tab) |
 | GET  | `/update_password` | Change-password form |
 | POST | `/update_password_action` | Change the current operator's password |
 | GET  | `/mfa` | Two-factor management page |
@@ -131,14 +147,8 @@ pages themselves are identical.
 | POST | `/mfa_regenerate` | Mint new recovery codes |
 | POST | `/logout` | Destroy the session |
 
-### Administrator, operator or auditor (`require_attack_viewer`)
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET  | `/view_waf_request/?id=<id>` | Single WAF finding detail (new tab) |
-
-Only `admin` and `operator` accounts can sign in today; the auditor role is
-accepted by the detail-view middleware for forward compatibility.
+All three roles — `admin`, `operator` and `auditor` — can sign in. The auditor is
+a read-only role: dashboard, attacks monitor and its own account settings only.
 
 Every mutation uses POST and a CSRF token. The JSON endpoints never return
 `encrypted_password_hash`.

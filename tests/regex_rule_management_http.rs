@@ -9,8 +9,8 @@
 //!
 //! It also pins the security properties the feature must hold: an empty file is
 //! refused with an actionable message, a forged CSRF token is rejected before the
-//! WAF is contacted, an auditor cannot authenticate to the console at all, and an
-//! unauthenticated client is bounced from the editor routes.
+//! WAF is contacted, an auditor can sign in but is blocked from the editor routes
+//! server-side, and an unauthenticated client is bounced from the editor routes.
 //!
 //! The UI router is served over plain HTTP (TLS is added by `main` in
 //! production), so cookies are managed by hand rather than through reqwest's jar.
@@ -491,7 +491,7 @@ async fn regex_rules_view_and_update_round_trip() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn auditor_cannot_authenticate_or_reach_the_regex_editor() {
+async fn auditor_signs_in_but_cannot_reach_the_regex_editor() {
     let (waf_url, captured) = spawn_mock_waf().await;
     let base = spawn_kraken_ui(&waf_url).await;
     let client = Client::builder()
@@ -537,33 +537,62 @@ async fn auditor_cannot_authenticate_or_reach_the_regex_editor() {
         created.status()
     );
 
-    // The auditor's correct credentials do not yield a session: the console only
-    // admits admins and operators, so an auditor can never view or edit rules.
-    let auditor_session = login(&client, &base, "auditor1", AUDITOR_PASSWORD).await;
+    // The auditor signs in successfully and receives a console session: the
+    // read-only role is now a first-class console identity.
+    let auditor_session = login(&client, &base, "auditor1", AUDITOR_PASSWORD)
+        .await
+        .expect("an auditor must receive a console session");
+
+    // Their sidebar carries only the read-only sections — no Rule-management
+    // entry points and no admin sections.
+    let dashboard = client
+        .get(format!("{base}/kraken_ui/auth/dashboard"))
+        .header(
+            header::COOKIE,
+            format!("{SESSION_COOKIE}={auditor_session}"),
+        )
+        .send()
+        .await
+        .expect("auditor dashboard");
+    assert_eq!(
+        dashboard.status(),
+        reqwest::StatusCode::OK,
+        "the auditor must reach the dashboard"
+    );
+    let dashboard_html = dashboard.text().await.expect("dashboard html");
     assert!(
-        auditor_session.is_none(),
-        "an auditor must not receive a console session"
+        !dashboard_html.contains("Rule management"),
+        "the auditor sidebar must not advertise rule management"
+    );
+    assert!(
+        dashboard_html.contains("Auditor console"),
+        "the auditor sidebar must identify the read-only console"
     );
 
-    // And with no session, the editor routes redirect to login without ever
-    // contacting the WAF.
+    // Even with a valid session, the editor routes are blocked server-side: the
+    // auditor is bounced and the WAF is never contacted.
     for path in [
         "/kraken_ui/auth/rule_management/regex",
         "/kraken_ui/auth/rule_management/regex/edit?rule=body_regex",
     ] {
         let response = client
             .get(format!("{base}{path}"))
+            .header(
+                header::COOKIE,
+                format!("{SESSION_COOKIE}={auditor_session}"),
+            )
             .send()
             .await
             .expect("guarded request");
         assert!(
             response.status().is_redirection(),
-            "{path} must redirect an unauthenticated client"
+            "{path} must redirect an auditor, got {}",
+            response.status()
         );
     }
     assert_eq!(
         captured.lock().expect("capture lock").view_auth,
         None,
-        "the WAF must never be contacted for an unauthorised client"
+        "the WAF must never be contacted for an auditor"
     );
 }

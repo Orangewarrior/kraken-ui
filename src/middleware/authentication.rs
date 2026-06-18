@@ -14,15 +14,18 @@ pub async fn require_admin(session: Session, request: Request, next: Next) -> Re
     guard(session, request, next, &["admin"]).await
 }
 
-/// Day-to-day console routes (dashboard, attacks table, self-service password
-/// change, logout) are open to both administrators and operators.
+/// Operator-grade routes (rule management) are open to administrators and
+/// operators, but not auditors: changing WAF detection is outside an auditor's
+/// read-only remit.
 pub async fn require_operator(session: Session, request: Request, next: Next) -> Response {
     guard(session, request, next, &["admin", "operator"]).await
 }
 
-/// The single-attack detail view is a read-only investigative page; it is shared
-/// by every authenticated role that is allowed to inspect WAF findings.
-pub async fn require_attack_viewer(session: Session, request: Request, next: Next) -> Response {
+/// The read-only console surface — dashboard, attacks monitor (table and the
+/// single-attack detail view), and self-service account settings (password and
+/// two-factor) plus logout — shared by every authenticated role, including the
+/// auditor. The detail view still masks secret parameter values for non-admins.
+pub async fn require_console_viewer(session: Session, request: Request, next: Next) -> Response {
     guard(session, request, next, &["admin", "operator", "auditor"]).await
 }
 
