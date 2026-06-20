@@ -33,6 +33,27 @@ All notable changes to this project are recorded in this file.
   (`admin | operator | auditor`); any other stored role is still refused with the
   same generic failure a wrong password gets, so it is not a credential oracle.
 
+### Documentation
+
+- **Complete draw.io visual architecture suite.** Added editable `.drawio`
+  sources and PNG previews under `docs/diagrams/`, indexed by
+  `docs/visual-architecture.md`. The suite includes the single-instance SQLite
+  GCRA architecture, multi-replica Redis GCRA architecture, the HTTP request and
+  middleware flow, and the server-side KrakenWAF integration boundary.
+- **SQLite and Redis deployment semantics documented.** The diagrams distinguish
+  the process-local `axum-governor`, concurrency permits and login throttles from
+  the persistent GCRA backend. SQLite uses a local WAL database; Redis uses TLS,
+  ACL credentials and an atomic Lua operation to coordinate only the persistent
+  GCRA decision across replicas. UI sessions, operators and other local controls
+  remain replica-local, and source-IP-preserving distribution is required.
+- **KrakenWAF communication flow documented.** The integration diagram covers
+  pinned HTTPS metrics on port `4343`, read-only access to `vulns_alert.db`, the
+  combined dashboard view, and CMC/regex rule management on port `4342` with
+  server-generated Rorschach tokens. Bearer and Rorschach secrets never reach the
+  browser.
+- Updated `README.md` and `docs/architecture.md` to link the visual guide and
+  corrected the previous statement that all rate-limit state was process-local.
+
 ### Tests
 
 - Added `tests/auditor_console_access_http.rs`: a real-HTTP test that signs in as
