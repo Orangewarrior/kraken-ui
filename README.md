@@ -245,6 +245,8 @@ src/
 For the bigger picture, see the [`docs/`](docs/) directory:
 
 - [Architecture](docs/architecture.md) — how the pieces fit together.
+- [Visual architecture](docs/visual-architecture.md) — editable draw.io diagrams
+  for SQLite and Redis GCRA deployments, HTTP processing and KrakenWAF integration.
 - [WAF bearer authentication](docs/waf-bearer-auth.md) — shared token loading,
   port `4343`, systemd and troubleshooting.
 - [Rule management](docs/rule-management.md) — the CMC control plane, the

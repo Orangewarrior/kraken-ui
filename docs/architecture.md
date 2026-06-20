@@ -3,6 +3,9 @@
 This is a tour of how Kraken UI is put together. The goal is that you can open
 any module and immediately know what it is responsible for.
 
+For deployment and runtime diagrams, see the
+[visual architecture guide](visual-architecture.md).
+
 ## How the code is organised
 
 | Module           | Responsibility |
@@ -79,15 +82,15 @@ replacement process with listener shutdown.
 
 ## Cross-cutting concerns
 
-- **Rate limiting.** `LoginThrottle` locks a source IP, and an IP+account pair,
-  after repeated login failures; `IpRateLimiter` caps overall request volume per
-  IP as a global outer layer; and `AccountFailureMonitor` raises a detection-only
-  audit alert when one account draws failures from many IPs (it never locks, so a
-  victim cannot be locked out from addresses they do not control). All three are
-  process-local today, and all key on the **direct socket peer** — Kraken UI is
-  meant to terminate TLS itself. Behind a reverse proxy every client would share
-  the proxy's IP, collapsing both the per-IP limiter and the audited client IP, so
-  do not deploy it that way without a trusted-proxy story.
+- **Rate limiting.** The outer `axum-governor` GCRA tracker and the non-queuing
+  concurrency semaphore are process-local. A second GCRA decision persists in
+  SQLite or Redis; Redis coordinates that decision across replicas. Login
+  throttles remain process-local, while `AccountFailureMonitor` emits a
+  detection-only audit alert when one account draws failures from many IPs. All
+  controls key on the **direct socket peer** — Kraken UI does not trust forwarding
+  headers. A reverse proxy that does not preserve the source address collapses
+  all clients onto the proxy IP, so multi-replica deployments require a
+  source-IP-preserving connection path.
 - **Audit logging.** Authentication and operator-administration events are
   emitted on the `audit` tracing target and written to a dedicated `audit.jsonl`
   sink, separate from the application log, and never contain secrets.
