@@ -2,6 +2,67 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.20.0 - 2026-06-21
+
+### Security
+
+- **Added step-up authentication for sensitive operator actions.** ACL create,
+  update and delete operations, two-factor enrollment/disable/recovery-code
+  regeneration, and the Kraken UI self-update start endpoint now require the
+  current password. Accounts with two-factor enabled must also provide a fresh
+  TOTP or recovery code before the action is accepted.
+- **Hardened in-application source updates.** Unsigned source updates now fail
+  closed by default. Administrators can still view the update page, but update
+  execution is blocked unless `KRAKEN_UI_ALLOW_UNSIGNED_SOURCE_UPDATE=1` is set
+  after an external release-provenance decision.
+- **Added trusted reverse-proxy handling.** `trusted-proxy-ips` explicitly lists
+  the direct proxy peers allowed to supply `Forwarded`, `X-Forwarded-For` or
+  `X-Real-IP`. Spoofed forwarding headers from untrusted peers are ignored for
+  audit and rate-limit keys.
+- **Strengthened configuration validation.** `db-ui` and `db-waf-alerts` are now
+  compared by canonical path and, on Unix, device/inode metadata so symlinks and
+  equivalent paths cannot point both database roles at the same file. Startup also
+  rejects loose TLS private-key permissions and group/other-writable persistent
+  directories when those paths exist.
+- **Added persistent authentication pressure limits.** Login and MFA attempts now
+  pass through a stricter persistent GCRA limiter on the configured SQLite or
+  Redis backend, while the existing process-local login throttle continues to
+  provide short lockouts.
+
+### Changed
+
+- **Centralized role authorization in `OperatorRole`.** Role parsing, labels and
+  capabilities now live in the operator model instead of being spread across
+  string comparisons in controllers and middleware. Route guards now accept
+  `OperatorRole` values directly.
+- **Aligned client-IP behavior across authentication and request middleware.**
+  Login, MFA, concurrency limits and persistent request limits use the same
+  effective-client-IP resolver. When `trusted-proxy-ips` is configured, the
+  direct-peer `axum-governor` layer is skipped so clients do not collapse onto the
+  proxy IP; the persistent and concurrency limiters still use the forwarded
+  client IP.
+- **Updated ACL, MFA and update forms.** Sensitive workflows now collect the
+  current password and, when applicable, a two-factor code before mutation.
+- **Bumped the package version from `0.19.0` to `0.20.0`.**
+
+### Documentation
+
+- Updated operations, rate-limiting, security, source-update, MFA,
+  security-review and visual-architecture documentation to describe step-up
+  authentication, trusted proxy mode, persistent login/MFA limiting, source-update
+  opt-in behavior and the new configuration checks.
+- Added `trusted-proxy-ips: []` to `conf/setup.yaml` with guidance to keep it
+  empty for direct TLS exposure.
+
+### Tests
+
+- Added unit coverage for trusted proxy IP resolution, trusted-proxy config
+  validation, symlinked UI/WAF database rejection, loose private-key permission
+  rejection and unsigned source-update opt-in parsing.
+- Updated HTTP integration tests to exercise the new step-up fields and preserve
+  the auditor, login/logout, rate-limit, rule-management and WAF-request redaction
+  boundaries.
+
 ## 0.19.0 - 2026-06-18
 
 ### Added

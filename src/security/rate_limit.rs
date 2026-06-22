@@ -12,9 +12,10 @@ use std::{
 /// sliding window; once `max_failures` is reached the key is locked for
 /// `lockout`. A successful authentication clears the key.
 ///
-/// State is process-local. For a multi-replica deployment this should be backed
-/// by a shared store, but even process-local throttling closes the unbounded
-/// online-guessing window that existed before.
+/// State is process-local and intentionally cheap. The application pairs it with
+/// a persistent GCRA authentication limiter when request rate limiting is
+/// enabled, so replicas share broad login pressure while this structure keeps
+/// short local lockouts simple.
 #[derive(Debug)]
 pub struct LoginThrottle {
     entries: Mutex<HashMap<String, Attempt>>,

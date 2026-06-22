@@ -17,9 +17,13 @@ use crate::{
     controllers::{
         auth,
         pagination::{PageResponse, parse_query_u64},
+        step_up::{self, StepUpOutcome},
     },
     error::AppError,
-    models::operator_repository::{NewOperator, OperatorRepository, UpdateOperator},
+    models::{
+        operator::OperatorRole,
+        operator_repository::{NewOperator, OperatorRepository, UpdateOperator},
+    },
     security::{csrf, sanitize},
     services::password_crypto::spawn_verify,
     state::AppState,
@@ -35,12 +39,18 @@ pub struct OperatorForm {
     email: String,
     user_type: String,
     password: String,
+    current_password: String,
+    #[serde(default)]
+    mfa_code: String,
     csrf_token: String,
 }
 
 #[derive(Deserialize)]
 pub struct DeleteUserForm {
     user_identity: String,
+    current_password: String,
+    #[serde(default)]
+    mfa_code: String,
     csrf_token: String,
 }
 
@@ -57,6 +67,9 @@ pub struct UpdateUserForm {
     email: String,
     user_type: String,
     password: String,
+    current_password: String,
+    #[serde(default)]
+    mfa_code: String,
     csrf_token: String,
 }
 
@@ -88,6 +101,7 @@ pub async fn insert_user(token: CsrfToken) -> Result<Response, AppError> {
 pub async fn insert_user_action(
     State(state): State<AppState>,
     token: CsrfToken,
+    session: Session,
     Form(form): Form<OperatorForm>,
 ) -> Result<Response, AppError> {
     if !csrf::verify(&token, &form.csrf_token) {
@@ -118,6 +132,13 @@ pub async fn insert_user_action(
         .is_some()
     {
         return render_add_user(token, "That username is already taken.".to_owned(), "error");
+    }
+    match step_up::verify(&state, &session, &form.current_password, &form.mfa_code).await? {
+        StepUpOutcome::Verified(_) => {}
+        StepUpOutcome::Unauthorized => return Ok(StatusCode::UNAUTHORIZED.into_response()),
+        StepUpOutcome::Rejected(message) => {
+            return render_add_user(token, message.to_owned(), "error");
+        }
     }
     let created = repository
         .create(NewOperator {
@@ -180,6 +201,13 @@ pub async fn delete_user_action(
             "error",
         );
     }
+    match step_up::verify(&state, &session, &form.current_password, &form.mfa_code).await? {
+        StepUpOutcome::Verified(_) => {}
+        StepUpOutcome::Unauthorized => return Ok(StatusCode::UNAUTHORIZED.into_response()),
+        StepUpOutcome::Rejected(message) => {
+            return render_delete_user(token, identity, message.to_owned(), "error");
+        }
+    }
     repository.delete_by_id(target.id_user).await?;
     // Revoke the removed operator's live sessions so the account cannot keep
     // working until its session happens to expire.
@@ -241,7 +269,7 @@ pub async fn update_user_action(
         Err(message) => return render_edit_operator(token, existing, message, "error"),
     };
     if auth::authenticated_user_id(&session).await? == Some(id_user)
-        && input.operator_type != "admin"
+        && input.operator_type != OperatorRole::Admin.as_str()
     {
         return render_edit_operator(
             token,
@@ -273,6 +301,13 @@ pub async fn update_user_action(
             "That username is already taken.".to_owned(),
             "error",
         );
+    }
+    match step_up::verify(&state, &session, &form.current_password, &form.mfa_code).await? {
+        StepUpOutcome::Verified(_) => {}
+        StepUpOutcome::Unauthorized => return Ok(StatusCode::UNAUTHORIZED.into_response()),
+        StepUpOutcome::Rejected(message) => {
+            return render_edit_operator(token, existing, message.to_owned(), "error");
+        }
     }
     // Capture the privilege change before `existing` is consumed by the update,
     // so a demotion can be enforced on any live session of the target.
@@ -462,9 +497,8 @@ fn validate_operator(
     if !valid_email(&email) {
         return Err("The email address is invalid or longer than 128 characters.".to_owned());
     }
-    if !matches!(operator_type.as_str(), "admin" | "operator" | "auditor") {
-        return Err("Invalid user type.".to_owned());
-    }
+    let role =
+        OperatorRole::parse(&operator_type).ok_or_else(|| "Invalid user type.".to_owned())?;
     let password = if raw_password.is_empty() && password_optional {
         None
     } else {
@@ -478,7 +512,7 @@ fn validate_operator(
     Ok(ValidatedOperator {
         username,
         email,
-        operator_type,
+        operator_type: role.as_str().to_owned(),
         password,
     })
 }
@@ -636,10 +670,11 @@ fn render_password(
     message: String,
     message_class: &'static str,
 ) -> Result<Response, AppError> {
-    let show_acl = operator.operator_type == "admin";
+    let role = operator.role();
+    let show_acl = role.is_some_and(OperatorRole::can_administer);
     // Auditors share this self-service page but get the read-only sidebar; every
     // other console role keeps the rule-management section.
-    let show_rule_management = operator.operator_type != "auditor";
+    let show_rule_management = role.is_some_and(OperatorRole::can_manage_rules);
     render_with_csrf(token, |csrf_token| UpdatePasswordTemplate {
         active_page: nav::USER_STATUS,
         csrf_token,
@@ -655,16 +690,15 @@ fn render_password(
 }
 
 fn role_options(selected: Option<&str>) -> Vec<RoleOption> {
-    [
-        ("admin", "Admin"),
-        ("operator", "Operator"),
-        ("auditor", "Auditor"),
-    ]
-    .into_iter()
-    .map(|(value, label)| RoleOption {
-        value,
-        label,
-        selected: selected == Some(value),
-    })
-    .collect()
+    OperatorRole::ALL
+        .into_iter()
+        .map(|role| {
+            let value = role.as_str();
+            RoleOption {
+                value,
+                label: role.label(),
+                selected: selected == Some(value),
+            }
+        })
+        .collect()
 }

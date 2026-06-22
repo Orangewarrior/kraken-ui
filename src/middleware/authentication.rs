@@ -7,18 +7,24 @@ use axum::{
 use tower_sessions::Session;
 use tracing::error;
 
-use crate::controllers::auth;
+use crate::{controllers::auth, models::operator::OperatorRole};
 
 /// Only `admin` sessions may reach ACL administration routes.
 pub async fn require_admin(session: Session, request: Request, next: Next) -> Response {
-    guard(session, request, next, &["admin"]).await
+    guard(session, request, next, &[OperatorRole::Admin]).await
 }
 
 /// Operator-grade routes (rule management) are open to administrators and
 /// operators, but not auditors: changing WAF detection is outside an auditor's
 /// read-only remit.
 pub async fn require_operator(session: Session, request: Request, next: Next) -> Response {
-    guard(session, request, next, &["admin", "operator"]).await
+    guard(
+        session,
+        request,
+        next,
+        &[OperatorRole::Admin, OperatorRole::Operator],
+    )
+    .await
 }
 
 /// The read-only console surface — dashboard, attacks monitor (table and the
@@ -26,14 +32,17 @@ pub async fn require_operator(session: Session, request: Request, next: Next) ->
 /// two-factor) plus logout — shared by every authenticated role, including the
 /// auditor. The detail view still masks secret parameter values for non-admins.
 pub async fn require_console_viewer(session: Session, request: Request, next: Next) -> Response {
-    guard(session, request, next, &["admin", "operator", "auditor"]).await
+    guard(session, request, next, &OperatorRole::ALL).await
 }
 
-async fn guard(session: Session, request: Request, next: Next, allowed_types: &[&str]) -> Response {
-    let mut response = match auth::authenticated_operator_type(&session).await {
-        Ok(Some(operator_type)) if allowed_types.contains(&operator_type.as_str()) => {
-            next.run(request).await
-        }
+async fn guard(
+    session: Session,
+    request: Request,
+    next: Next,
+    allowed_roles: &[OperatorRole],
+) -> Response {
+    let mut response = match auth::authenticated_role(&session).await {
+        Ok(Some(role)) if allowed_roles.contains(&role) => next.run(request).await,
         Ok(_) => Redirect::to("/kraken_ui/login").into_response(),
         Err(_) => {
             error!("failed to read authentication session");

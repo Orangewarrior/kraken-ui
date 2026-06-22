@@ -10,7 +10,9 @@ section in the left navigation contains **Update Kraken UI**, which opens:
 Operators and auditors cannot see the menu and cannot access its page, start
 endpoint or status endpoint. All updater routes are protected by the same
 `require_admin` middleware used for ACL administration. Starting an update also
-writes a `source_update_started` event to the audit log.
+requires the administrator's current password and, when enabled on the account,
+a current two-factor code. Successful starts write a `source_update_started`
+event to the audit log.
 
 ## User flow
 
@@ -53,6 +55,12 @@ at 100 MiB and caps extracted regular-file content at 500 MiB. GitHub source
 archives are transport-authenticated by TLS; deployments requiring artifact
 signatures should continue using an externally managed, signed package pipeline
 instead of enabling in-application source updates.
+
+Unsigned in-application source updates are disabled by default. Set
+`KRAKEN_UI_ALLOW_UNSIGNED_SOURCE_UPDATE=1` only after an external release
+verification process has already made the trust decision for this deployment.
+Without that opt-in the update page remains visible to administrators, but a
+start request fails closed before contacting GitHub.
 
 ## Preserved local state
 

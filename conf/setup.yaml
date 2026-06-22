@@ -12,3 +12,6 @@ waf-cert-ca: "../KrakenWAF/certs/cert.pem"
 waf-rule-endpoint: "https://127.0.0.1:4342"
 log-dir: log
 session-timeout-minutes: 30
+# Optional: exact reverse-proxy peer IPs allowed to supply Forwarded,
+# X-Forwarded-For or X-Real-IP. Keep empty for direct TLS exposure.
+trusted-proxy-ips: []

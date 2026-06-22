@@ -71,17 +71,16 @@ behind them. For a running list of known gaps and proposed improvements, see
 ## Client IP and reverse proxies
 
 The login throttle and the global per-IP request limiter key on the TCP peer
-address from `ConnectInfo` — never on a client-supplied header such as
-`X-Forwarded-For`, which is trivially spoofable. Kraken UI is therefore designed
-to be exposed **directly at the edge**: terminate TLS on the process itself, as
-the mandatory-TLS server does.
+address from `ConnectInfo` by default. Client-supplied forwarding headers are
+ignored unless `trusted-proxy-ips` in `conf/setup.yaml` contains the exact direct
+peer IP. In that trusted-proxy mode, Kraken UI accepts `Forwarded`,
+`X-Forwarded-For` or `X-Real-IP` for audit and rate-limit keys.
 
-If you must place it behind a reverse proxy, be aware that every request then
-appears to originate from the proxy's address, which collapses both limiters
-onto a single key. Run the proxy on the same trust boundary and do not rely on
-the per-IP controls for tenant isolation in that topology. (The `first_time`
-bootstrap endpoint already refuses any request carrying proxy forwarding headers,
-so it cannot be reached through a proxy at all.)
+Keep `trusted-proxy-ips` empty when Kraken UI terminates TLS directly. If a
+reverse proxy is required, run it on the same trust boundary and never add broad
+or unspecified addresses. The `first_time` bootstrap endpoint still refuses any
+request carrying proxy forwarding headers, so it cannot be reached through a
+proxy at all.
 
 ## Licence policy
 

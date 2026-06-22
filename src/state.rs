@@ -31,6 +31,10 @@ pub struct RateLimiting {
     pub account_failure_monitor: Arc<AccountFailureMonitor>,
     /// Persistent GCRA request limiter (SQLite or Redis); `None` when disabled.
     pub persistent: Option<PersistentRateLimiter>,
+    /// Stricter persistent GCRA limiter for login and MFA attempts. This uses the
+    /// same backend as the request limiter so replicas share authentication
+    /// pressure state instead of relying only on process-local counters.
+    pub login_persistent: Option<PersistentRateLimiter>,
     /// Active, non-queuing per-IP concurrency ceiling.
     pub ip_concurrency: Arc<IpConcurrencyLimiter>,
     /// Maximum time a single request may run before it is timed out.

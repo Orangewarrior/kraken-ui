@@ -39,8 +39,10 @@ failures per source IP *and* per account; reaching the threshold (5 failures in
 5 minutes) locks the key for 15 minutes, and a successful login clears it. A
 locked client receives a generic "too many attempts" message.
 
-**Follow-up:** the throttle is process-local. For a multi-replica deployment,
-back it with a shared store.
+**Status update:** login and MFA attempts also pass through a stricter
+persistent GCRA limiter on the configured SQLite or Redis rate-limit backend,
+so replicas can share authentication pressure state. The process-local
+`LoginThrottle` remains as the short lockout mechanism.
 
 ### H-2 — Username enumeration via login timing _(High)_
 
@@ -218,12 +220,8 @@ expensive work from request hot paths:
 
 Intentionally out of scope, tracked for later:
 
-- Back the login throttle and the request rate limiter (and optionally sessions)
-  with a shared store for multi-replica deployments; today they are
-  process-local.
-- Add an explicit trusted-proxy mode so the per-IP controls and the audited
-  client IP work correctly behind a load balancer; today they require direct TLS
-  termination.
+- Continue reducing unavoidable duplicate transitive crate versions as upstream
+  dependencies converge.
 - Consider TLS 1.3-only and/or mutual TLS for the console. The current rustls
   defaults (TLS 1.2+1.3 with strong cipher suites) are already safe, so this is
   a deployment-policy choice rather than a fix.

@@ -141,6 +141,7 @@ async fn login_dashboard_logout_round_trip() {
         waf_rule_certificate_path: None,
         log_directory: directory.path().to_path_buf(),
         session_timeout_minutes: 30,
+        trusted_proxy_ips: Vec::new(),
     };
 
     // Real password crypto so the bootstrapped admin password actually verifies.

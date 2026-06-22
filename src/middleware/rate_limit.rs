@@ -78,7 +78,12 @@ pub async fn apply(State(state): State<AppState>, request: Request, next: Next) 
         return next.run(request).await;
     };
 
-    let Some(semaphore) = state.rate_limiting.ip_concurrency.semaphore(peer.ip()) else {
+    let client_ip = crate::security::client_ip::effective_client_ip(
+        peer.ip(),
+        request.headers(),
+        &state.config.trusted_proxy_ips,
+    );
+    let Some(semaphore) = state.rate_limiting.ip_concurrency.semaphore(client_ip) else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             "Rate limiter temporarily unavailable",
@@ -90,7 +95,7 @@ pub async fn apply(State(state): State<AppState>, request: Request, next: Next) 
     };
 
     if let Some(limiter) = &state.rate_limiting.persistent {
-        let decision = limiter.check(&peer.ip().to_string()).await;
+        let decision = limiter.check(&client_ip.to_string()).await;
         if !decision.allowed {
             return rate_limited(decision.retry_after);
         }

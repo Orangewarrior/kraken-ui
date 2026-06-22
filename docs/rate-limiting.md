@@ -18,16 +18,24 @@ that file and restarting the service changes the active limits.
 | `backend` | `sqlite` | Persistent backend: `sqlite` or `redis`. |
 | `fail_open` | `false` | When `false`, backend errors reject requests. |
 
-The local layer is
+The local direct-peer layer is
 [`axum-governor`](https://docs.rs/axum-governor/) using governor's GCRA
 algorithm. A second GCRA decision is persisted in SQLite or Redis. This keeps a
 restart from immediately resetting every allowance and lets Redis coordinate
 multiple Kraken UI replicas.
 
 `Retry-After` is returned with persistent and concurrency `429` responses.
-Kraken UI uses the TCP peer address installed by Axum `ConnectInfo`; it does not
-trust forwarding headers. Deploy it directly or ensure the actual peer is the
-address whose traffic should be limited.
+Kraken UI uses the TCP peer address installed by Axum `ConnectInfo` by default.
+If `trusted-proxy-ips` is set in `conf/setup.yaml`, forwarding headers
+(`Forwarded`, `X-Forwarded-For`, `X-Real-IP`) are trusted only when the direct
+peer matches one of those exact proxy IPs. Leave it empty for direct TLS
+exposure. In trusted-proxy mode the direct-peer `axum-governor` layer is skipped
+to avoid collapsing every client onto the proxy IP; the persistent limiter and
+the concurrency limiter continue to use the effective forwarded client IP.
+
+Login and MFA attempts also use a stricter persistent GCRA limiter
+(1 request/second with a burst of 5) on the same SQLite or Redis backend, while
+the existing process-local failure throttle still handles short lockouts.
 
 ## SQLite backend
 

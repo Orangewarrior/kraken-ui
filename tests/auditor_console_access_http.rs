@@ -140,6 +140,7 @@ async fn spawn_kraken_ui() -> String {
         waf_rule_certificate_path: None,
         log_directory: directory.path().to_path_buf(),
         session_timeout_minutes: 30,
+        trusted_proxy_ips: Vec::new(),
     };
 
     // One shared crypto instance so the auditor we create out-of-band verifies

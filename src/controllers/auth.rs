@@ -4,6 +4,7 @@ use anyhow::anyhow;
 use axum::{
     Form,
     extract::{ConnectInfo, State},
+    http::HeaderMap,
     response::{IntoResponse, Redirect, Response},
 };
 use axum_csrf::CsrfToken;
@@ -16,8 +17,8 @@ use zeroize::Zeroizing;
 use crate::{
     error::AppError,
     models::{
-        operator_mfa_repository::OperatorMfaRepository, operator_repository::OperatorRepository,
-        session_store::USER_ID_FIELD,
+        operator::OperatorRole, operator_mfa_repository::OperatorMfaRepository,
+        operator_repository::OperatorRepository, session_store::USER_ID_FIELD,
     },
     security::{csrf, sanitize},
     services::password_crypto::{spawn_dummy, spawn_verify},
@@ -74,7 +75,7 @@ pub async fn login_page(token: CsrfToken, session: Session) -> Result<Response, 
 /// attacks monitor and their own account settings). Any other stored role — even
 /// with valid credentials — is refused at sign-in.
 pub fn is_console_role(operator_type: &str) -> bool {
-    matches!(operator_type, "admin" | "operator" | "auditor")
+    OperatorRole::parse(operator_type).is_some_and(OperatorRole::can_use_console)
 }
 
 pub async fn login_submit(
@@ -82,18 +83,29 @@ pub async fn login_submit(
     State(state): State<AppState>,
     token: CsrfToken,
     session: Session,
+    headers: HeaderMap,
     Form(form): Form<LoginForm>,
 ) -> Result<Response, AppError> {
     if !csrf::verify(&token, &form.csrf_token) {
         return Ok(csrf_error_response());
     }
 
-    let client_ip = peer.ip().to_string();
+    let client_ip = crate::security::client_ip::effective_client_ip(
+        peer.ip(),
+        &headers,
+        &state.config.trusted_proxy_ips,
+    )
+    .to_string();
     let ip_key = format!("ip:{client_ip}");
 
     // Throttle by source IP before doing any expensive work.
     if let Some(remaining) = state.rate_limiting.login_throttle.locked_for(&ip_key) {
         audit_login(&client_ip, "", "locked");
+        return locked_login_response(token, remaining).await;
+    }
+    if let Some(remaining) = persistent_login_retry_after(&state, &format!("login:{ip_key}")).await
+    {
+        audit_login(&client_ip, "", "persistent_locked");
         return locked_login_response(token, remaining).await;
     }
 
@@ -106,6 +118,12 @@ pub async fn login_submit(
 
     if let Some(remaining) = state.rate_limiting.login_throttle.locked_for(&ip_user_key) {
         audit_login(&client_ip, &username, "locked");
+        return locked_login_response(token, remaining).await;
+    }
+    if let Some(remaining) =
+        persistent_login_retry_after(&state, &format!("login:{ip_user_key}")).await
+    {
+        audit_login(&client_ip, &username, "persistent_locked");
         return locked_login_response(token, remaining).await;
     }
 
@@ -219,6 +237,7 @@ pub async fn mfa_verify(
     State(state): State<AppState>,
     token: CsrfToken,
     session: Session,
+    headers: HeaderMap,
     Form(form): Form<MfaCodeForm>,
 ) -> Result<Response, AppError> {
     if !csrf::verify(&token, &form.csrf_token) {
@@ -228,12 +247,23 @@ pub async fn mfa_verify(
         return Ok(Redirect::to("/kraken_ui/login").into_response());
     };
 
-    let client_ip = peer.ip().to_string();
+    let client_ip = crate::security::client_ip::effective_client_ip(
+        peer.ip(),
+        &headers,
+        &state.config.trusted_proxy_ips,
+    )
+    .to_string();
     // Throttle code guessing per source IP and pending account, mirroring the
     // password path, so a six-digit code cannot be brute-forced online.
     let throttle_key = format!("mfa:{client_ip}|user:{id_user}");
     if let Some(remaining) = state.rate_limiting.login_throttle.locked_for(&throttle_key) {
         audit_login(&client_ip, "", "mfa_locked");
+        return locked_mfa_response(token, remaining).await;
+    }
+    if let Some(remaining) =
+        persistent_login_retry_after(&state, &format!("login:{throttle_key}")).await
+    {
+        audit_login(&client_ip, "", "mfa_persistent_locked");
         return locked_mfa_response(token, remaining).await;
     }
 
@@ -391,10 +421,19 @@ pub async fn authenticated_operator_type(session: &Session) -> Result<Option<Str
         })
 }
 
+pub async fn authenticated_role(session: &Session) -> Result<Option<OperatorRole>, AppError> {
+    Ok(authenticated_operator_type(session)
+        .await?
+        .as_deref()
+        .and_then(OperatorRole::parse))
+}
+
 /// Whether the current session belongs to an administrator. Controllers use this
 /// to decide if the ACL section of the sidebar should be rendered.
 pub async fn is_admin(session: &Session) -> Result<bool, AppError> {
-    Ok(authenticated_operator_type(session).await?.as_deref() == Some("admin"))
+    Ok(authenticated_role(session)
+        .await?
+        .is_some_and(OperatorRole::can_administer))
 }
 
 /// Whether the current session belongs to an auditor. Auditors get a deliberately
@@ -402,7 +441,7 @@ pub async fn is_admin(session: &Session) -> Result<bool, AppError> {
 /// controllers use this to hide the rule-management section of the sidebar (the
 /// routes behind it stay guarded server-side regardless).
 pub async fn is_auditor(session: &Session) -> Result<bool, AppError> {
-    Ok(authenticated_operator_type(session).await?.as_deref() == Some("auditor"))
+    Ok(authenticated_role(session).await? == Some(OperatorRole::Auditor))
 }
 
 pub async fn authenticated_username(session: &Session) -> Option<String> {
@@ -437,6 +476,12 @@ fn register_login_failure(
             "elevated authentication failures for a single account across sources"
         );
     }
+}
+
+async fn persistent_login_retry_after(state: &AppState, key: &str) -> Option<Duration> {
+    let limiter = state.rate_limiting.login_persistent.as_ref()?;
+    let decision = limiter.check(key).await;
+    (!decision.allowed).then_some(decision.retry_after)
 }
 
 fn audit_login(client_ip: &str, username: &str, outcome: &str) {

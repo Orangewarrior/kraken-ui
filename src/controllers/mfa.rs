@@ -10,24 +10,29 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use qrcode::{QrCode, render::svg};
 use serde::Deserialize;
 use tower_sessions::Session;
-use zeroize::Zeroizing;
 
 use crate::{
-    controllers::auth,
+    controllers::{
+        auth,
+        step_up::{self, StepUpOutcome},
+    },
     error::AppError,
     models::{
-        operator::Model as Operator, operator_mfa_repository::OperatorMfaRepository,
+        operator::{Model as Operator, OperatorRole},
+        operator_mfa_repository::OperatorMfaRepository,
         operator_repository::OperatorRepository,
     },
     security::{csrf, sanitize},
-    services::password_crypto::spawn_verify,
     state::AppState,
     view::{MfaTemplate, csrf_error_response, nav, render_with_csrf},
 };
 
 #[derive(Deserialize)]
-pub struct CsrfForm {
+pub struct StepUpForm {
     csrf_token: String,
+    current_password: String,
+    #[serde(default)]
+    mfa_code: String,
 }
 
 #[derive(Deserialize)]
@@ -39,6 +44,8 @@ pub struct ConfirmForm {
 #[derive(Deserialize)]
 pub struct DisableForm {
     current_password: String,
+    #[serde(default)]
+    mfa_code: String,
     csrf_token: String,
 }
 
@@ -72,13 +79,22 @@ pub async fn mfa_enroll(
     State(state): State<AppState>,
     token: CsrfToken,
     session: Session,
-    Form(form): Form<CsrfForm>,
+    Form(form): Form<StepUpForm>,
 ) -> Result<Response, AppError> {
     if !csrf::verify(&token, &form.csrf_token) {
         return Ok(csrf_error_response());
     }
-    let Some(operator) = current_operator(&state, &session).await? else {
-        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    let operator = match step_up::verify(&state, &session, &form.current_password, &form.mfa_code)
+        .await?
+    {
+        StepUpOutcome::Verified(operator) => operator,
+        StepUpOutcome::Unauthorized => return Ok(StatusCode::UNAUTHORIZED.into_response()),
+        StepUpOutcome::Rejected(message) => {
+            let Some(operator) = current_operator(&state, &session).await? else {
+                return Ok(StatusCode::UNAUTHORIZED.into_response());
+            };
+            return render_overview(&state, token, &operator, message.to_owned(), "error").await;
+        }
     };
     let mfa = mfa_repository(&state);
     if mfa.is_enabled(operator.id_user).await? {
@@ -181,19 +197,18 @@ pub async fn mfa_disable(
     if !csrf::verify(&token, &form.csrf_token) {
         return Ok(csrf_error_response());
     }
-    let Some(operator) = current_operator(&state, &session).await? else {
-        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    let operator = match step_up::verify(&state, &session, &form.current_password, &form.mfa_code)
+        .await?
+    {
+        StepUpOutcome::Verified(operator) => operator,
+        StepUpOutcome::Unauthorized => return Ok(StatusCode::UNAUTHORIZED.into_response()),
+        StepUpOutcome::Rejected(message) => {
+            let Some(operator) = current_operator(&state, &session).await? else {
+                return Ok(StatusCode::UNAUTHORIZED.into_response());
+            };
+            return render_overview(&state, token, &operator, message.to_owned(), "error").await;
+        }
     };
-    if !verify_password(&state, &operator, &form.current_password).await? {
-        return render_overview(
-            &state,
-            token,
-            &operator,
-            "The current password is incorrect.".to_owned(),
-            "error",
-        )
-        .await;
-    }
     mfa_repository(&state).disable(operator.id_user).await?;
     audit_mfa_event("disable", operator.id_user, &operator.username);
     render_overview(
@@ -211,13 +226,22 @@ pub async fn mfa_regenerate(
     State(state): State<AppState>,
     token: CsrfToken,
     session: Session,
-    Form(form): Form<CsrfForm>,
+    Form(form): Form<StepUpForm>,
 ) -> Result<Response, AppError> {
     if !csrf::verify(&token, &form.csrf_token) {
         return Ok(csrf_error_response());
     }
-    let Some(operator) = current_operator(&state, &session).await? else {
-        return Ok(StatusCode::UNAUTHORIZED.into_response());
+    let operator = match step_up::verify(&state, &session, &form.current_password, &form.mfa_code)
+        .await?
+    {
+        StepUpOutcome::Verified(operator) => operator,
+        StepUpOutcome::Unauthorized => return Ok(StatusCode::UNAUTHORIZED.into_response()),
+        StepUpOutcome::Rejected(message) => {
+            let Some(operator) = current_operator(&state, &session).await? else {
+                return Ok(StatusCode::UNAUTHORIZED.into_response());
+            };
+            return render_overview(&state, token, &operator, message.to_owned(), "error").await;
+        }
     };
     match mfa_repository(&state)
         .regenerate_recovery_codes(operator.id_user)
@@ -259,35 +283,19 @@ async fn current_operator(
     )
 }
 
-async fn verify_password(
-    state: &AppState,
-    operator: &Operator,
-    password: &str,
-) -> Result<bool, AppError> {
-    let verification = spawn_verify(
-        state.password_crypto.clone(),
-        operator.id_user,
-        operator.encrypted_password_hash.clone(),
-        Zeroizing::new(password.to_owned()),
-    )
-    .await
-    .map_err(AppError::internal)?;
-    Ok(verification.valid)
-}
-
 fn mfa_repository(state: &AppState) -> OperatorMfaRepository {
     OperatorMfaRepository::new(state.database.clone(), state.password_crypto.clone())
 }
 
 fn is_admin(operator: &Operator) -> bool {
-    operator.operator_type == "admin"
+    operator.role().is_some_and(OperatorRole::can_administer)
 }
 
 /// Whether this operator keeps the Rule-management sidebar section. Every console
 /// role except the read-only auditor does. Two-factor enrollment is self-service
 /// and shared by every role, so the sidebar is the only thing that varies here.
 fn shows_rule_management(operator: &Operator) -> bool {
-    operator.operator_type != "auditor"
+    operator.role().is_some_and(OperatorRole::can_manage_rules)
 }
 
 async fn render_overview(

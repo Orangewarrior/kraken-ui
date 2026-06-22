@@ -6,5 +6,6 @@ pub mod mfa;
 pub mod pagination;
 pub mod rule_management;
 pub mod setup;
+pub mod step_up;
 pub mod update;
 pub mod waf;

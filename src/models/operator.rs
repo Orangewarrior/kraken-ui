@@ -23,3 +23,62 @@ pub struct Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+/// Console roles persisted in the `operators.type` column.
+///
+/// The database stores these as lowercase strings for compatibility with the
+/// existing schema; the enum keeps authorization decisions out of scattered
+/// string comparisons.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OperatorRole {
+    Admin,
+    Operator,
+    Auditor,
+}
+
+impl OperatorRole {
+    pub const ALL: [Self; 3] = [Self::Admin, Self::Operator, Self::Auditor];
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "admin" => Some(Self::Admin),
+            "operator" => Some(Self::Operator),
+            "auditor" => Some(Self::Auditor),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Admin => "admin",
+            Self::Operator => "operator",
+            Self::Auditor => "auditor",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Admin => "Admin",
+            Self::Operator => "Operator",
+            Self::Auditor => "Auditor",
+        }
+    }
+
+    pub fn can_use_console(self) -> bool {
+        true
+    }
+
+    pub fn can_administer(self) -> bool {
+        self == Self::Admin
+    }
+
+    pub fn can_manage_rules(self) -> bool {
+        matches!(self, Self::Admin | Self::Operator)
+    }
+}
+
+impl Model {
+    pub fn role(&self) -> Option<OperatorRole> {
+        OperatorRole::parse(&self.operator_type)
+    }
+}

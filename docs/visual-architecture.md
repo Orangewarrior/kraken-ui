@@ -19,12 +19,14 @@ editable sources use draw.io XML and all labels are in English.
 
 ![Kraken UI SQLite architecture](diagrams/kraken-ui-sqlite-architecture.png)
 
-Every request first crosses process-local `axum-governor`, then the non-queuing
-per-IP concurrency gate and the persistent GCRA decision. In the default mode,
-GCRA state is stored in `db/kraken-ui-ratelimit.sqlite` using WAL and immediate
-transactions. The UI's own `db-ui` database is separate and read-write; it
-stores operators, MFA material and revocable sessions. KrakenWAF's
-`vulns_alert.db` is a third database opened strictly read-only.
+In direct-peer mode every request first crosses process-local `axum-governor`,
+then the non-queuing per-IP concurrency gate and the persistent GCRA decision.
+When `trusted-proxy-ips` is configured, the direct-peer governor is skipped and
+the effective forwarded client IP is used by the remaining controls. In the
+default SQLite mode, GCRA state is stored in `db/kraken-ui-ratelimit.sqlite`
+using WAL and immediate transactions. The UI's own `db-ui` database is separate
+and read-write; it stores operators, MFA material and revocable sessions.
+KrakenWAF's `vulns_alert.db` is a third database opened strictly read-only.
 
 ## Redis GCRA architecture
 
@@ -37,9 +39,9 @@ and session store remain per replica. Redis therefore coordinates request
 allowance but does not make the rest of Kraken UI state distributed.
 
 Kraken UI keys all IP controls on the direct TCP peer and ignores forwarding
-headers. A multi-replica frontend must preserve the original source IP; a
-conventional reverse proxy otherwise collapses all users into one limiter key
-and one audited client address.
+headers unless `trusted-proxy-ips` lists the direct proxy peer. A multi-replica
+frontend should use the shared SQLite or Redis limiter backend and configure
+only exact trusted proxy addresses when the source IP is forwarded.
 
 ## HTTP request flow
 

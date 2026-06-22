@@ -133,5 +133,6 @@ existing login events.
 - The recovery-code download is generated as a one-shot `data:` URL in the page
   that already shows the codes. The server does not persist a separate export
   artifact.
-- Throttling state is process-local, like the password throttle; a multi-replica
-  deployment should front it with a shared store.
+- Code attempts use the same process-local failure throttle as login and also
+  pass through the persistent SQLite/Redis authentication limiter when request
+  rate limiting is enabled.

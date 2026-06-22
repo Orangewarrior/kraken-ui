@@ -99,6 +99,14 @@ impl AppFactory {
             warn!("global request rate limiting is disabled by conf/ratelimit.yaml");
             None
         };
+        let login_rate_limiter = if rate_limit_config.enabled {
+            Some(
+                PersistentRateLimiter::from_config(&login_rate_limit_config(&rate_limit_config))
+                    .await?,
+            )
+        } else {
+            None
+        };
         let database = database::connect(&self.config.database_path).await?;
         let waf_database = match &self.config.waf_database_path {
             Some(path) if path.exists() => Some(database::connect_read_only(path).await?),
@@ -167,6 +175,7 @@ impl AppFactory {
                 login_throttle: Arc::new(LoginThrottle::with_defaults()),
                 account_failure_monitor: Arc::new(AccountFailureMonitor::with_defaults()),
                 persistent: persistent_rate_limiter,
+                login_persistent: login_rate_limiter,
                 ip_concurrency: Arc::new(rate_limit::IpConcurrencyLimiter::new(
                     rate_limit_config.max_coroutines_per_ip,
                 )),
@@ -209,12 +218,24 @@ impl AppFactory {
                 rate_limit_state,
                 rate_limit::apply,
             ));
-        if rate_limit_config.enabled {
+        if rate_limit_config.enabled && self.config.trusted_proxy_ips.is_empty() {
             Ok(application.layer(rate_limit_config.governor_layer()?))
+        } else if rate_limit_config.enabled {
+            warn!(
+                "process-local governor layer is disabled because trusted-proxy-ips is configured; persistent and concurrency limiters still use the trusted forwarded client IP"
+            );
+            Ok(application)
         } else {
             Ok(application)
         }
     }
+}
+
+fn login_rate_limit_config(config: &RateLimitConfig) -> RateLimitConfig {
+    let mut login = config.clone();
+    login.requests_per_second = 1;
+    login.burst_size = 5;
+    login
 }
 
 /// Loads the cookie signing key from `KRAKEN_UI_SESSION_KEY` or
@@ -493,6 +514,7 @@ mod tests {
             waf_rule_certificate_path: None,
             log_directory: directory.path().to_path_buf(),
             session_timeout_minutes: 30,
+            trusted_proxy_ips: Vec::new(),
         };
         let application = AppFactory::new(config)
             .with_password_crypto(Arc::new(TestPasswordCrypto))
@@ -545,6 +567,7 @@ mod tests {
             waf_rule_certificate_path: None,
             log_directory: directory.path().to_path_buf(),
             session_timeout_minutes: 30,
+            trusted_proxy_ips: Vec::new(),
         };
         let application = AppFactory::new(config)
             .with_password_crypto(Arc::new(TestPasswordCrypto))

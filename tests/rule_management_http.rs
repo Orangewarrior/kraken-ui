@@ -150,6 +150,7 @@ async fn spawn_kraken_ui(waf_url: &str) -> String {
         waf_rule_certificate_path: None,
         log_directory: directory.path().to_path_buf(),
         session_timeout_minutes: 30,
+        trusted_proxy_ips: Vec::new(),
     };
 
     let crypto = Arc::new(

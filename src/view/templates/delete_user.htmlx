@@ -4,9 +4,11 @@
   <section class="page-hero compact-hero"><span class="badge danger-badge">ACL</span><h1>Remove user</h1><p class="lead">Enter the exact numeric ID or email address of the account.</p></section>
   <section class="panel form-panel">
     {% if message != "" %}<p class="form-message {{ message_class }}" role="status">{{ message }}</p>{% endif %}
-    <form class="login-form management-form" method="post" action="/kraken_ui/auth/delete_user_action" data-confirm-delete>
+    <form class="login-form management-form" method="post" action="/kraken_ui/auth/delete_user_action" autocomplete="off" data-confirm-delete>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="field-group"><label for="user_identity">User ID or email</label><input id="user_identity" name="user_identity" required maxlength="128" value="{{ user_identity }}"></div>
+      <div class="field-group"><label for="current_password">Current password</label><input id="current_password" name="current_password" type="password" required maxlength="256" autocomplete="current-password"></div>
+      <div class="field-group"><label for="mfa_code">Two-factor code (if enabled)</label><input id="mfa_code" name="mfa_code" inputmode="numeric" maxlength="32" autocomplete="one-time-code"></div>
       <button class="cta danger-button" type="submit">Remove user</button>
     </form>
   </section>

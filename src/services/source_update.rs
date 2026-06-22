@@ -30,6 +30,8 @@ const ARCHIVE_URL_PREFIX: &str = "https://api.github.com/repos/Orangewarrior/kra
 const MAX_ARCHIVE_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_EXTRACTED_BYTES: u64 = 500 * 1024 * 1024;
 const MAX_LOG_BYTES: usize = 64 * 1024;
+const ALLOW_UNSIGNED_SOURCE_UPDATE_ENV: &str = "KRAKEN_UI_ALLOW_UNSIGNED_SOURCE_UPDATE";
+const UNSIGNED_SOURCE_UPDATE_DISABLED_MESSAGE: &str = "Unsigned in-application source updates are disabled. Deploy signed releases externally, or set KRAKEN_UI_ALLOW_UNSIGNED_SOURCE_UPDATE=1 only after an external process verifies the release provenance.";
 
 #[derive(Clone)]
 pub struct SourceUpdateService {
@@ -39,6 +41,7 @@ pub struct SourceUpdateService {
     source_root: PathBuf,
     executable: PathBuf,
     server_handle: Option<Handle<SocketAddr>>,
+    allow_unsigned_source_update: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -105,13 +108,20 @@ impl SourceUpdateService {
             .timeout(Duration::from_secs(60))
             .build()
             .context("failed to build the source-update HTTPS client")?;
+        let opt_in = std::env::var(ALLOW_UNSIGNED_SOURCE_UPDATE_ENV).ok();
+        let allow_unsigned_source_update = unsigned_source_update_opt_in(opt_in.as_deref());
+        let initial_log = if allow_unsigned_source_update {
+            "Ready to check the latest stable Kraken UI release.\n".to_owned()
+        } else {
+            format!("{UNSIGNED_SOURCE_UPDATE_DISABLED_MESSAGE}\n")
+        };
         Ok(Self {
             client,
             state: Arc::new(RwLock::new(UpdateStatus {
                 phase: UpdatePhase::Idle,
                 current_version: env!("CARGO_PKG_VERSION").to_owned(),
                 target_version: None,
-                log: "Ready to check the latest stable Kraken UI release.\n".to_owned(),
+                log: initial_log,
                 in_progress: false,
                 redirect_after_seconds: None,
             })),
@@ -119,6 +129,7 @@ impl SourceUpdateService {
             source_root,
             executable,
             server_handle,
+            allow_unsigned_source_update,
         })
     }
 
@@ -148,6 +159,9 @@ impl SourceUpdateService {
     }
 
     async fn run_update(&self) -> anyhow::Result<()> {
+        if !self.allow_unsigned_source_update {
+            bail!("{UNSIGNED_SOURCE_UPDATE_DISABLED_MESSAGE}");
+        }
         self.set_phase(
             UpdatePhase::Checking,
             "Checking the latest published GitHub release...",
@@ -369,6 +383,16 @@ fn validate_release_tag(tag: &str) -> anyhow::Result<Version> {
         bail!("release tag is not a stable semantic version");
     }
     Ok(version)
+}
+
+fn unsigned_source_update_opt_in(value: Option<&str>) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes"
+    )
 }
 
 fn validate_source_root(root: &Path) -> anyhow::Result<()> {
@@ -618,6 +642,7 @@ mod tests {
     use super::{
         GitHubRelease, UpdatePhase, append_log, copy_release_source, protected_path,
         stable_version_from_release, strip_archive_root, unpack_release_archive,
+        unsigned_source_update_opt_in,
     };
 
     #[test]
@@ -640,6 +665,16 @@ mod tests {
             prerelease: true,
         };
         assert!(stable_version_from_release(&prerelease).is_err());
+    }
+
+    #[test]
+    fn unsigned_source_updates_require_explicit_opt_in() {
+        assert!(!unsigned_source_update_opt_in(None));
+        assert!(!unsigned_source_update_opt_in(Some("")));
+        assert!(!unsigned_source_update_opt_in(Some("0")));
+        assert!(unsigned_source_update_opt_in(Some("1")));
+        assert!(unsigned_source_update_opt_in(Some("true")));
+        assert!(unsigned_source_update_opt_in(Some("YES")));
     }
 
     #[test]

@@ -1,11 +1,12 @@
 use std::{
-    net::SocketAddr,
+    fs,
+    net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
 };
 
 use anyhow::{Context, bail};
 use serde::Deserialize;
-use tokio::fs;
+use tokio::fs as tokio_fs;
 
 const MINIMUM_SESSION_MINUTES: u64 = 5;
 const MAXIMUM_SESSION_MINUTES: u64 = 1_440;
@@ -46,12 +47,17 @@ pub struct AppConfig {
     pub log_directory: PathBuf,
     #[serde(rename = "session-timeout-minutes")]
     pub session_timeout_minutes: u64,
+    /// Exact TCP peer IPs trusted to provide forwarding headers. Empty by default:
+    /// Kraken UI uses the direct socket peer and ignores `Forwarded` /
+    /// `X-Forwarded-For`.
+    #[serde(rename = "trusted-proxy-ips", default)]
+    pub trusted_proxy_ips: Vec<IpAddr>,
 }
 
 impl AppConfig {
     pub async fn load(path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let path = path.as_ref();
-        let bytes = fs::read(path)
+        let bytes = tokio_fs::read(path)
             .await
             .with_context(|| format!("unable to read configuration file {}", path.display()))?;
         let config: Self = serde_yaml::from_slice(&bytes)
@@ -110,10 +116,13 @@ impl AppConfig {
         if self
             .waf_database_path
             .as_ref()
-            .is_some_and(|path| path == &self.database_path)
+            .is_some_and(|path| paths_may_reference_same_file(&self.database_path, path))
         {
             bail!("db-ui and db-waf-alerts must reference different files");
         }
+        validate_private_key_permissions(&self.private_key_path)?;
+        validate_persistent_directory(&self.database_path, "db-ui")?;
+        validate_persistent_directory(&self.log_directory, "log-dir")?;
         if self
             .waf_certificate_path
             .as_ref()
@@ -145,12 +154,96 @@ impl AppConfig {
         {
             bail!("waf-rule-cert-ca cannot be empty when configured");
         }
+        if self.trusted_proxy_ips.iter().any(IpAddr::is_unspecified) {
+            bail!("trusted-proxy-ips cannot contain unspecified addresses");
+        }
         Ok(())
+    }
+}
+
+fn paths_may_reference_same_file(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    if let (Ok(left_meta), Ok(right_meta)) = (fs::metadata(left), fs::metadata(right))
+        && same_file_metadata(&left_meta, &right_meta)
+    {
+        return true;
+    }
+    normalized_with_existing_parent(left)
+        .zip(normalized_with_existing_parent(right))
+        .is_some_and(|(left, right)| left == right)
+}
+
+#[cfg(unix)]
+fn same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    left.dev() == right.dev() && left.ino() == right.ino()
+}
+
+#[cfg(not(unix))]
+fn same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    let _ = (left, right);
+    false
+}
+
+fn normalized_with_existing_parent(path: &Path) -> Option<PathBuf> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())?;
+    let file_name = path.file_name()?;
+    let parent = parent.canonicalize().ok()?;
+    Some(parent.join(file_name))
+}
+
+fn validate_private_key_permissions(path: &Path) -> anyhow::Result<()> {
+    let Ok(metadata) = fs::metadata(path) else {
+        return Ok(());
+    };
+    if crate::security::file_has_loose_permissions(&metadata) {
+        bail!(
+            "TLS private key {} must not be accessible by group or others",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+fn validate_persistent_directory(path: &Path, field: &str) -> anyhow::Result<()> {
+    let directory = if path.extension().is_some() {
+        path.parent().unwrap_or_else(|| Path::new("."))
+    } else {
+        path
+    };
+    let Ok(metadata) = fs::metadata(directory) else {
+        return Ok(());
+    };
+    if directory_has_loose_write_permissions(&metadata) {
+        bail!(
+            "{field} directory {} must not be writable by group or others",
+            directory.display()
+        );
+    }
+    Ok(())
+}
+
+fn directory_has_loose_write_permissions(metadata: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o022 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        false
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::AppConfig;
 
     const VALID: &str = r#"
@@ -170,6 +263,26 @@ session-timeout-minutes: 30
         Ok(config)
     }
 
+    fn config_with_paths(key: &Path, db_ui: &Path, db_waf: &Path, log_dir: &Path) -> String {
+        format!(
+            r#"
+cert-ca: {cert}
+key: {key}
+listen: "127.0.0.1:3443"
+db-ui: {db_ui}
+db-waf-alerts: {db_waf}
+waf-endpoint: "https://127.0.0.1:4343"
+log-dir: {log_dir}
+session-timeout-minutes: 30
+"#,
+            cert = key.with_file_name("ca.pem").display(),
+            key = key.display(),
+            db_ui = db_ui.display(),
+            db_waf = db_waf.display(),
+            log_dir = log_dir.display(),
+        )
+    }
+
     #[test]
     fn accepts_a_well_formed_configuration() {
         let config = parse(VALID).expect("valid configuration");
@@ -178,6 +291,7 @@ session-timeout-minutes: 30
             config.waf_database_path.as_deref().and_then(|p| p.to_str()),
             Some("db/vulns_alert.db")
         );
+        assert!(config.trusted_proxy_ips.is_empty());
     }
 
     #[test]
@@ -220,5 +334,54 @@ session-timeout-minutes: 30
         let yaml = VALID.replace("db/vulns_alert.db", "db/kraken-ui.sqlite");
         let error = parse(&yaml).expect_err("identical database paths must be rejected");
         assert!(error.to_string().contains("different files"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_ui_and_waf_databases() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let db = temp.path().join("ui.sqlite");
+        let alias = temp.path().join("alerts.sqlite");
+        std::fs::write(&db, b"sqlite").expect("db");
+        std::os::unix::fs::symlink(&db, &alias).expect("symlink");
+        let yaml = config_with_paths(&temp.path().join("key.pem"), &db, &alias, temp.path());
+
+        let error = parse(&yaml).expect_err("symlinked database paths must be rejected");
+        assert!(error.to_string().contains("different files"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_loose_tls_private_key_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let key = temp.path().join("key.pem");
+        std::fs::write(&key, b"private key").expect("key");
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o644))
+            .expect("permissions");
+        let yaml = config_with_paths(
+            &key,
+            &temp.path().join("ui.sqlite"),
+            &temp.path().join("alerts.sqlite"),
+            temp.path(),
+        );
+
+        let error = parse(&yaml).expect_err("loose private key must be rejected");
+        assert!(error.to_string().contains("TLS private key"));
+    }
+
+    #[test]
+    fn accepts_explicit_trusted_proxy_ips() {
+        let yaml = format!("{VALID}trusted-proxy-ips: [\"127.0.0.1\", \"::1\"]\n");
+        let config = parse(&yaml).expect("trusted proxies");
+        assert_eq!(config.trusted_proxy_ips.len(), 2);
+    }
+
+    #[test]
+    fn rejects_unspecified_trusted_proxy_ips() {
+        let yaml = format!("{VALID}trusted-proxy-ips: [\"0.0.0.0\"]\n");
+        let error = parse(&yaml).expect_err("unspecified proxy must be rejected");
+        assert!(error.to_string().contains("trusted-proxy-ips"));
     }
 }

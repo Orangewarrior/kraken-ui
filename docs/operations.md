@@ -85,7 +85,9 @@ the full route list.
 Version `0.13.0` adds an administrator-only update page. It requires outbound
 GitHub HTTPS access, `cargo`, a writable source checkout and permission to
 replace the running executable. Existing databases, `conf/`, certificates,
-logs, YAML files and `.conf` files are preserved. See
+logs, YAML files and `.conf` files are preserved. Unsigned in-application
+source updates are disabled unless `KRAKEN_UI_ALLOW_UNSIGNED_SOURCE_UPDATE=1`
+is set after an external release-provenance decision. See
 [source-updates.md](source-updates.md) for the complete trust model, update
 sequence and recovery procedure.
 
@@ -109,9 +111,11 @@ Do not enable payload logging in production.
 
 ## Rate limiting
 
-Three controls protect the service, all process-local:
+Four controls protect the service:
 
 - A login throttle locks a source IP (and IP+account) after repeated failures.
+- A persistent login/MFA limiter shares authentication pressure across replicas
+  through the configured SQLite or Redis rate-limit backend.
 - A global per-IP request rate limiter (a generous token bucket) caps overall
   request volume as defence in depth and returns `429 Too Many Requests` when
   exceeded.
@@ -119,10 +123,7 @@ Three controls protect the service, all process-local:
   event when one account accumulates many failures across different IPs. It is
   detection only and never locks an account.
 
-All three key on the **direct socket peer address**: Kraken UI is designed to
-terminate TLS itself. Behind a reverse proxy every request would carry the
-proxy's address, which collapses the per-IP limiter into one shared bucket and
-records the proxy as the client IP in the audit log. Terminate TLS directly, or
-add a trusted-proxy story before fronting it with a load balancer.
-
-For a multi-replica deployment these should be backed by a shared store.
+By default, all per-IP controls key on the **direct socket peer address**.
+When Kraken UI sits behind a reverse proxy, set `trusted-proxy-ips` to the exact
+proxy addresses that may supply `Forwarded`, `X-Forwarded-For` or `X-Real-IP`.
+Never include broad or unspecified addresses.

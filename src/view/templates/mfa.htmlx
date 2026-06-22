@@ -38,13 +38,16 @@
       <p>You have <strong>{{ remaining_recovery_codes }}</strong> unused recovery code(s).</p>
       <form class="management-form" method="post" action="/kraken_ui/auth/mfa_regenerate">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="field-group"><label for="regenerate_current_password">Current password</label><input id="regenerate_current_password" name="current_password" type="password" required maxlength="256" autocomplete="current-password"></div>
+        <div class="field-group"><label for="regenerate_mfa_code">Two-factor code</label><input id="regenerate_mfa_code" name="mfa_code" inputmode="numeric" autocomplete="one-time-code" required minlength="6" maxlength="32" placeholder="123456"></div>
         <button class="ghost-button" type="submit">Regenerate recovery codes</button>
       </form>
       <h2>Disable two-factor</h2>
-      <p>Confirm your password to turn two-factor authentication off.</p>
+      <p>Confirm your password and current two-factor code to turn two-factor authentication off.</p>
       <form class="login-form management-form" method="post" action="/kraken_ui/auth/mfa_disable" autocomplete="off">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div class="field-group"><label for="current_password">Current password</label><input id="current_password" name="current_password" type="password" required maxlength="256" autocomplete="current-password"></div>
+        <div class="field-group"><label for="disable_mfa_code">Two-factor code</label><input id="disable_mfa_code" name="mfa_code" inputmode="numeric" autocomplete="one-time-code" required minlength="6" maxlength="32" placeholder="123456"></div>
         <button class="cta danger" type="submit">Disable two-factor</button>
       </form>
     </div>
@@ -53,8 +56,9 @@
     <div class="mfa-status">
       <p class="form-message" role="status">Two-factor authentication is <strong>disabled</strong> on your account.</p>
       <p>Enabling it adds a one-time code from your authenticator app to every sign-in.</p>
-      <form class="management-form" method="post" action="/kraken_ui/auth/mfa_enroll">
+      <form class="login-form management-form" method="post" action="/kraken_ui/auth/mfa_enroll" autocomplete="off">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="field-group"><label for="enroll_current_password">Current password</label><input id="enroll_current_password" name="current_password" type="password" required maxlength="256" autocomplete="current-password"></div>
         <button class="cta" type="submit">Enable two-factor</button>
       </form>
     </div>

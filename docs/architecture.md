@@ -84,13 +84,13 @@ replacement process with listener shutdown.
 
 - **Rate limiting.** The outer `axum-governor` GCRA tracker and the non-queuing
   concurrency semaphore are process-local. A second GCRA decision persists in
-  SQLite or Redis; Redis coordinates that decision across replicas. Login
-  throttles remain process-local, while `AccountFailureMonitor` emits a
-  detection-only audit alert when one account draws failures from many IPs. All
-  controls key on the **direct socket peer** — Kraken UI does not trust forwarding
-  headers. A reverse proxy that does not preserve the source address collapses
-  all clients onto the proxy IP, so multi-replica deployments require a
-  source-IP-preserving connection path.
+  SQLite or Redis; Redis coordinates that decision across replicas. Login and
+  MFA attempts add a stricter persistent GCRA key on the same backend, while the
+  process-local `LoginThrottle` still provides short lockouts and
+  `AccountFailureMonitor` emits a detection-only audit alert when one account
+  draws failures from many IPs. Forwarding headers are trusted only from exact
+  `trusted-proxy-ips`; in that mode the direct-peer governor layer is skipped so
+  clients do not collapse onto the proxy IP.
 - **Audit logging.** Authentication and operator-administration events are
   emitted on the `audit` tracing target and written to a dedicated `audit.jsonl`
   sink, separate from the application log, and never contain secrets.

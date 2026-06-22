@@ -183,6 +183,7 @@ async fn spawn_kraken_ui(waf_url: &str) -> String {
         waf_rule_certificate_path: None,
         log_directory: directory.path().to_path_buf(),
         session_timeout_minutes: 30,
+        trusted_proxy_ips: Vec::new(),
     };
 
     let crypto = Arc::new(
@@ -526,6 +527,8 @@ async fn auditor_signs_in_but_cannot_reach_the_regex_editor() {
             ("email", "auditor1@example.invalid"),
             ("user_type", "auditor"),
             ("password", AUDITOR_PASSWORD),
+            ("current_password", ADMIN_PASSWORD),
+            ("mfa_code", ""),
             ("csrf_token", &add_token),
         ])
         .send()

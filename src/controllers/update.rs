@@ -10,7 +10,10 @@ use tower_sessions::Session;
 use tracing::info;
 
 use crate::{
-    controllers::auth,
+    controllers::{
+        auth,
+        step_up::{self, StepUpOutcome},
+    },
     error::AppError,
     security::csrf,
     state::AppState,
@@ -20,6 +23,9 @@ use crate::{
 #[derive(Deserialize)]
 pub struct UpdateForm {
     csrf_token: String,
+    current_password: String,
+    #[serde(default)]
+    mfa_code: String,
 }
 
 pub async fn page(token: CsrfToken) -> Result<Response, AppError> {
@@ -44,6 +50,15 @@ pub async fn start(
 ) -> Result<Response, AppError> {
     if !csrf::verify(&token, &form.csrf_token) {
         return Ok(csrf_error_response());
+    }
+    match step_up::verify(&state, &session, &form.current_password, &form.mfa_code).await? {
+        StepUpOutcome::Verified(_) => {}
+        StepUpOutcome::Unauthorized => {
+            return Ok((axum::http::StatusCode::UNAUTHORIZED, "Unauthorized").into_response());
+        }
+        StepUpOutcome::Rejected(message) => {
+            return Ok((axum::http::StatusCode::FORBIDDEN, message).into_response());
+        }
     }
     let started = state.source_update.start().await;
     if started {
