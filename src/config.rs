@@ -5,11 +5,13 @@ use std::{
 };
 
 use anyhow::{Context, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use tokio::fs as tokio_fs;
 
 const MINIMUM_SESSION_MINUTES: u64 = 5;
 const MAXIMUM_SESSION_MINUTES: u64 = 1_440;
+const DEFAULT_ADMIN_SESSION_TIME_LIMIT_SECONDS: u64 = 60 * 60;
+const MAXIMUM_ADMIN_SESSION_TIME_LIMIT_SECONDS: u64 = 12 * 60 * 60;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct AppConfig {
@@ -47,6 +49,16 @@ pub struct AppConfig {
     pub log_directory: PathBuf,
     #[serde(rename = "session-timeout-minutes")]
     pub session_timeout_minutes: u64,
+    /// Absolute lifetime for authenticated console sessions. The YAML key keeps
+    /// the requested spelling, while the correctly-spelled alias is accepted for
+    /// future configurations.
+    #[serde(
+        rename = "admin-session-time-limmit",
+        alias = "admin-session-time-limit",
+        default = "default_admin_session_time_limit_seconds",
+        deserialize_with = "deserialize_human_duration_seconds"
+    )]
+    pub admin_session_time_limit_seconds: u64,
     /// Exact TCP peer IPs trusted to provide forwarding headers. Empty by default:
     /// Kraken UI uses the direct socket peer and ignores `Forwarded` /
     /// `X-Forwarded-For`.
@@ -137,6 +149,11 @@ impl AppConfig {
                 "session-timeout-minutes must be between {MINIMUM_SESSION_MINUTES} and {MAXIMUM_SESSION_MINUTES}"
             );
         }
+        if self.admin_session_time_limit_seconds == 0
+            || self.admin_session_time_limit_seconds > MAXIMUM_ADMIN_SESSION_TIME_LIMIT_SECONDS
+        {
+            bail!("admin-session-time-limmit must be greater than 0s and no more than 12h");
+        }
         if !self.waf_endpoint.starts_with("https://") {
             bail!("waf-endpoint must use https://");
         }
@@ -159,6 +176,60 @@ impl AppConfig {
         }
         Ok(())
     }
+}
+
+fn default_admin_session_time_limit_seconds() -> u64 {
+    DEFAULT_ADMIN_SESSION_TIME_LIMIT_SECONDS
+}
+
+fn deserialize_human_duration_seconds<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    parse_human_duration_seconds(&value).map_err(serde::de::Error::custom)
+}
+
+fn parse_human_duration_seconds(raw: &str) -> Result<u64, String> {
+    let mut seconds = 0_u64;
+    let mut digits = String::new();
+    let mut saw_unit = false;
+    for character in raw.trim().chars() {
+        if character.is_ascii_digit() {
+            digits.push(character);
+            continue;
+        }
+        if character.is_ascii_whitespace() {
+            continue;
+        }
+        if digits.is_empty() {
+            return Err("duration must place a number before each unit".to_owned());
+        }
+        let amount = digits
+            .parse::<u64>()
+            .map_err(|_| "duration component is too large".to_owned())?;
+        let multiplier = match character {
+            's' | 'S' => 1,
+            'm' | 'M' => 60,
+            'h' | 'H' => 60 * 60,
+            _ => {
+                return Err("duration units must be s, m or h, for example 30m or 1h".to_owned());
+            }
+        };
+        seconds = seconds
+            .checked_add(
+                amount
+                    .checked_mul(multiplier)
+                    .ok_or_else(|| "duration is too large".to_owned())?,
+            )
+            .ok_or_else(|| "duration is too large".to_owned())?;
+        digits.clear();
+        saw_unit = true;
+    }
+    if !digits.is_empty() || !saw_unit {
+        return Err("duration must include a unit, for example 30m or 1h".to_owned());
+    }
+    Ok(seconds)
 }
 
 fn paths_may_reference_same_file(left: &Path, right: &Path) -> bool {
@@ -292,6 +363,7 @@ session-timeout-minutes: 30
             Some("db/vulns_alert.db")
         );
         assert!(config.trusted_proxy_ips.is_empty());
+        assert_eq!(config.admin_session_time_limit_seconds, 60 * 60);
     }
 
     #[test]
@@ -376,6 +448,24 @@ session-timeout-minutes: 30
         let yaml = format!("{VALID}trusted-proxy-ips: [\"127.0.0.1\", \"::1\"]\n");
         let config = parse(&yaml).expect("trusted proxies");
         assert_eq!(config.trusted_proxy_ips.len(), 2);
+    }
+
+    #[test]
+    fn accepts_human_admin_session_time_limits() {
+        let config =
+            parse(&format!("{VALID}admin-session-time-limmit: 1h30m\n")).expect("duration");
+        assert_eq!(config.admin_session_time_limit_seconds, 90 * 60);
+
+        let config =
+            parse(&format!("{VALID}admin-session-time-limit: 45m\n")).expect("alias duration");
+        assert_eq!(config.admin_session_time_limit_seconds, 45 * 60);
+    }
+
+    #[test]
+    fn rejects_admin_session_time_limits_above_the_ceiling() {
+        let error = parse(&format!("{VALID}admin-session-time-limmit: 13h\n"))
+            .expect_err("absolute session limit must have a ceiling");
+        assert!(error.to_string().contains("admin-session-time-limmit"));
     }
 
     #[test]

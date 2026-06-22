@@ -15,6 +15,14 @@ pub struct Model {
     /// confirmed an authenticator. Surfaced as the "2MFA" column in the users
     /// table.
     pub mfa_enabled: i32,
+    /// Monotonic authorization epoch copied into each session. Any privilege,
+    /// password, account or MFA state change increments it so old sessions fail
+    /// closed even if best-effort session cleanup fails.
+    pub authz_version: i64,
+    /// Last successful full authentication, kept in the operator table for audit.
+    pub authenticated_at: Option<String>,
+    /// Last successful step-up authentication before a sensitive action.
+    pub reauthenticated_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

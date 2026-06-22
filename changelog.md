@@ -2,6 +2,79 @@
 
 All notable changes to this project are recorded in this file.
 
+## 0.20.2 - 2026-06-21
+
+### Security
+
+- **Added an absolute authenticated-session lifetime.** Console sessions now
+  carry `authenticated_at` in the session payload and are flushed once they exceed
+  the configured absolute lifetime, independently of the existing idle timeout.
+- **Made the absolute lifetime configurable with a safe ceiling.** `conf/setup.yaml`
+  now includes `admin-session-time-limmit: 1h` using simple human notation
+  (`s`, `m`, `h`, including combinations such as `1h30m`). Values above `12h`
+  are refused at startup. The correctly spelled `admin-session-time-limit` alias
+  is also accepted.
+- **Rotates authenticated session identifiers periodically.** Session IDs rotate
+  at login and again during authenticated use after a short rotation interval,
+  reducing the value of a captured session identifier while keeping idle expiry
+  unchanged.
+- **Persists authentication audit timestamps.** The `operators` table now records
+  `authenticated_at` for completed logins and `reauthenticated_at` for successful
+  step-up authentication before sensitive operations.
+- **Keeps authorization epoch invalidation immediate.** The session guard still
+  reloads the current operator and rejects stale `authz_version` or role values
+  before allowing protected routes.
+
+### Changed
+
+- **Bumped the package version from `0.20.1` to `0.20.2`.**
+
+### Tests
+
+- Added configuration coverage for default, human-readable and over-ceiling
+  absolute session lifetimes.
+- Extended the login integration flow to prove an absolute-expired session is
+  redirected to full authentication even when idle expiry has not elapsed.
+- Added repository coverage for `authenticated_at` and `reauthenticated_at`
+  audit timestamp writes without changing the authorization epoch.
+
+## 0.20.1 - 2026-06-21
+
+### Security
+
+- **Made MFA consumption atomic under concurrency.** TOTP steps now use a
+  compare-and-set update on the exact TOTP row and accept authentication only
+  when one row is updated. Recovery codes are still cryptographically validated
+  before mutation, but consumption is confirmed only by a conditional
+  `used = 0` update on the exact recovery-code row.
+- **Wrapped MFA lifecycle changes in transactions.** Enrollment replacement,
+  confirmation, disable and recovery-code regeneration now use SeaORM
+  transactions so failures cannot leave partial states such as MFA enabled
+  without recovery codes or incomplete secret/code deletion.
+- **Made privilege revocation fail closed with authorization epochs.** Operators
+  now carry a monotonic `authz_version` copied into authenticated sessions.
+  Guarded requests reload the current operator and reject stale sessions
+  immediately when the stored role or epoch no longer matches.
+- **Bumped authorization epochs in the same write path as authority changes.**
+  Operator updates, password changes, MFA confirmation, MFA disable and recovery
+  code regeneration now increment `authz_version` in the same transaction or
+  atomic update as the underlying authorization change. Session deletion remains
+  a cleanup mechanism rather than the only security boundary.
+
+### Changed
+
+- **Bumped the package version from `0.20.0` to `0.20.1`.**
+
+### Tests
+
+- Added MFA race tests with `Barrier`/`tokio::join!` proving exactly one
+  concurrent request can consume a TOTP step or recovery code, plus a rollback
+  test for failed confirmation after partial transactional work has begun.
+- Added regression coverage proving an old authenticated session is redirected
+  after an authorization epoch bump even when no session row is deleted, plus
+  repository assertions for epoch increments on operator updates and password
+  changes.
+
 ## 0.20.0 - 2026-06-21
 
 ### Security

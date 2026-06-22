@@ -1,5 +1,5 @@
 use axum::{
-    extract::Request,
+    extract::{Request, State},
     http::{HeaderValue, header::CACHE_CONTROL},
     middleware::Next,
     response::{IntoResponse, Redirect, Response},
@@ -7,18 +7,29 @@ use axum::{
 use tower_sessions::Session;
 use tracing::error;
 
-use crate::{controllers::auth, models::operator::OperatorRole};
+use crate::{controllers::auth, models::operator::OperatorRole, state::AppState};
 
 /// Only `admin` sessions may reach ACL administration routes.
-pub async fn require_admin(session: Session, request: Request, next: Next) -> Response {
-    guard(session, request, next, &[OperatorRole::Admin]).await
+pub async fn require_admin(
+    State(state): State<AppState>,
+    session: Session,
+    request: Request,
+    next: Next,
+) -> Response {
+    guard(state, session, request, next, &[OperatorRole::Admin]).await
 }
 
 /// Operator-grade routes (rule management) are open to administrators and
 /// operators, but not auditors: changing WAF detection is outside an auditor's
 /// read-only remit.
-pub async fn require_operator(session: Session, request: Request, next: Next) -> Response {
+pub async fn require_operator(
+    State(state): State<AppState>,
+    session: Session,
+    request: Request,
+    next: Next,
+) -> Response {
     guard(
+        state,
         session,
         request,
         next,
@@ -31,17 +42,23 @@ pub async fn require_operator(session: Session, request: Request, next: Next) ->
 /// single-attack detail view), and self-service account settings (password and
 /// two-factor) plus logout — shared by every authenticated role, including the
 /// auditor. The detail view still masks secret parameter values for non-admins.
-pub async fn require_console_viewer(session: Session, request: Request, next: Next) -> Response {
-    guard(session, request, next, &OperatorRole::ALL).await
+pub async fn require_console_viewer(
+    State(state): State<AppState>,
+    session: Session,
+    request: Request,
+    next: Next,
+) -> Response {
+    guard(state, session, request, next, &OperatorRole::ALL).await
 }
 
 async fn guard(
+    state: AppState,
     session: Session,
     request: Request,
     next: Next,
     allowed_roles: &[OperatorRole],
 ) -> Response {
-    let mut response = match auth::authenticated_role(&session).await {
+    let mut response = match auth::authorized_role(&state, &session).await {
         Ok(Some(role)) if allowed_roles.contains(&role) => next.run(request).await,
         Ok(_) => Redirect::to("/kraken_ui/login").into_response(),
         Err(_) => {

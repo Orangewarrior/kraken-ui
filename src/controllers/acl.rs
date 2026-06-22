@@ -209,8 +209,8 @@ pub async fn delete_user_action(
         }
     }
     repository.delete_by_id(target.id_user).await?;
-    // Revoke the removed operator's live sessions so the account cannot keep
-    // working until its session happens to expire.
+    // Cleanup only: guarded requests also reload the operator and fail closed
+    // once this row is gone, so access is not preserved if this delete fails.
     revoke_sessions(&state, target.id_user).await;
     audit_operator_event("delete", target.id_user, &target.username);
     render_delete_user(token, String::new(), "User removed.".to_owned(), "error")
@@ -268,9 +268,8 @@ pub async fn update_user_action(
         Ok(input) => input,
         Err(message) => return render_edit_operator(token, existing, message, "error"),
     };
-    if auth::authenticated_user_id(&session).await? == Some(id_user)
-        && input.operator_type != OperatorRole::Admin.as_str()
-    {
+    let authenticated_id = auth::authenticated_user_id(&session).await?;
+    if authenticated_id == Some(id_user) && input.operator_type != OperatorRole::Admin.as_str() {
         return render_edit_operator(
             token,
             existing,
@@ -310,7 +309,7 @@ pub async fn update_user_action(
         }
     }
     // Capture the privilege change before `existing` is consumed by the update,
-    // so a demotion can be enforced on any live session of the target.
+    // so live sessions of the target can be cleaned up after the epoch bump.
     let role_changed = existing.operator_type != input.operator_type;
     let updated = repository
         .update(
@@ -323,8 +322,12 @@ pub async fn update_user_action(
             },
         )
         .await?;
-    // The route guards read the role from the session, so a change only takes
-    // effect once the operator signs in again under the new authority.
+    if authenticated_id == Some(updated.id_user) {
+        auth::refresh_authenticated_session(&session, &updated).await?;
+    }
+    // Session revocation is only a cleanup now. The authorization epoch written
+    // by the update above makes stale sessions fail closed on their next guarded
+    // request even if this delete fails.
     if role_changed {
         revoke_sessions(&state, updated.id_user).await;
     }
@@ -449,8 +452,10 @@ pub async fn update_password_action(
         Ok(updated) => updated,
         Err(error) => return Err(AppError::internal(error)),
     };
+    auth::refresh_authenticated_session(&session, &updated).await?;
     // A changed password should not leave other sessions logged in (a hijacker's
-    // included); revoke them all while sparing the tab making the change.
+    // included); revoke them all while sparing the tab making the change. If the
+    // cleanup fails, the authorization epoch still makes old sessions unusable.
     if let Some(current) = session.id()
         && let Err(error) = state
             .session_store

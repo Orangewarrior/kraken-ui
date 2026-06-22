@@ -4,7 +4,11 @@
 //! the controllers together — the critical path where a regression is costly and
 //! the unit tests, by design, cannot see the interaction.
 
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use axum::{
     Router,
@@ -19,12 +23,14 @@ use tower::ServiceExt;
 use kraken_ui::{
     AppFactory,
     config::AppConfig,
+    models::database,
     services::{
         password_crypto::DryocPasswordCryptoService,
         rate_limit::{BackendKind, RateLimitConfig, RedisConfig, SqliteConfig},
         waf_metrics::WafMetricsService,
     },
 };
+use sea_orm::{ConnectionTrait, DbBackend, Statement, Value};
 
 const ADMIN_PASSWORD: &str = "Reliable-Console9Key";
 const PEER: &str = "127.0.0.1:50555";
@@ -123,6 +129,90 @@ fn location(response: &Response) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+async fn login_as_admin(app: &Router) -> String {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/kraken_ui/login")
+                .extension(connect_info())
+                .body(Body::empty())
+                .expect("login page request"),
+        )
+        .await
+        .expect("login page response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let login_csrf_cookie = set_cookie(&response, CSRF_COOKIE).expect("login csrf cookie");
+    let login_token = csrf_token(&body_string(response).await);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/kraken_ui/login")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::COOKIE, format!("{CSRF_COOKIE}={login_csrf_cookie}"))
+                .extension(connect_info())
+                .body(Body::from(format!(
+                    "login=admin&password={}&csrf_token={}",
+                    form_encode(ADMIN_PASSWORD),
+                    form_encode(&login_token)
+                )))
+                .expect("login submit request"),
+        )
+        .await
+        .expect("login submit response");
+    assert!(response.status().is_redirection());
+    set_cookie(&response, SESSION_COOKIE).expect("session cookie")
+}
+
+async fn assert_authenticated_at_recorded(database_path: &Path) {
+    let database = database::connect(database_path)
+        .await
+        .expect("test database connection");
+    let row = database
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT authenticated_at FROM operators WHERE username = ?",
+            [Value::from("admin".to_owned())],
+        ))
+        .await
+        .expect("operator timestamp query")
+        .expect("admin operator row");
+    let authenticated_at: Option<String> = row
+        .try_get("", "authenticated_at")
+        .expect("authenticated_at column");
+    assert!(authenticated_at.is_some());
+}
+
+async fn expire_latest_session_absolute(database_path: &Path) {
+    let database = database::connect(database_path)
+        .await
+        .expect("test database connection");
+    let row = database
+        .query_one(Statement::from_string(
+            DbBackend::Sqlite,
+            "SELECT id, record FROM kraken_sessions WHERE user_id = 1 \
+             ORDER BY expiry_utc DESC LIMIT 1",
+        ))
+        .await
+        .expect("session row query")
+        .expect("session row");
+    let id: String = row.try_get("", "id").expect("session id");
+    let record: String = row.try_get("", "record").expect("session record");
+    let mut record: serde_json::Value = serde_json::from_str(&record).expect("session record json");
+    record["data"]["authenticated_at"] = serde_json::json!(0);
+    database
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "UPDATE kraken_sessions SET record = ? WHERE id = ?",
+            [Value::from(record.to_string()), Value::from(id)],
+        ))
+        .await
+        .expect("session absolute expiry update");
+}
+
 #[tokio::test]
 async fn login_dashboard_logout_round_trip() {
     // A securely named temporary directory holds the UI database and logs; its
@@ -141,8 +231,10 @@ async fn login_dashboard_logout_round_trip() {
         waf_rule_certificate_path: None,
         log_directory: directory.path().to_path_buf(),
         session_timeout_minutes: 30,
+        admin_session_time_limit_seconds: 60 * 60,
         trusted_proxy_ips: Vec::new(),
     };
+    let database_path = config.database_path.clone();
 
     // Real password crypto so the bootstrapped admin password actually verifies.
     let crypto = Arc::new(
@@ -273,5 +365,73 @@ async fn login_dashboard_logout_round_trip() {
         .await
         .expect("post-logout response");
     assert!(response.status().is_redirection());
+    assert_eq!(location(&response).as_deref(), Some("/kraken_ui/login"));
+
+    // 6. Log in again, then simulate an absolute lifetime breach inside the
+    // persisted session record. Idle expiry is still in the future, so the guard
+    // must enforce the absolute timestamp itself.
+    let expired_session_cookie = login_as_admin(&app).await;
+    assert_authenticated_at_recorded(&database_path).await;
+    expire_latest_session_absolute(&database_path).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/kraken_ui/auth/admin_panel")
+                .header(
+                    header::COOKIE,
+                    format!("{SESSION_COOKIE}={expired_session_cookie}"),
+                )
+                .extension(connect_info())
+                .body(Body::empty())
+                .expect("absolute-expired dashboard request"),
+        )
+        .await
+        .expect("absolute-expired dashboard response");
+    assert!(
+        response.status().is_redirection(),
+        "absolute-expired session should redirect, got {}",
+        response.status()
+    );
+    assert_eq!(location(&response).as_deref(), Some("/kraken_ui/login"));
+
+    // 7. Log in again, then simulate an authorization-changing write that bumps
+    // the epoch without deleting sessions. The stale session must fail closed on
+    // the next privileged request.
+    let stale_session_cookie = login_as_admin(&app).await;
+
+    let database = database::connect(&database_path)
+        .await
+        .expect("test database connection");
+    database
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "UPDATE operators SET authz_version = authz_version + 1 WHERE username = ?",
+            [Value::from("admin".to_owned())],
+        ))
+        .await
+        .expect("authorization epoch bump");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/kraken_ui/auth/admin_panel")
+                .header(
+                    header::COOKIE,
+                    format!("{SESSION_COOKIE}={stale_session_cookie}"),
+                )
+                .extension(connect_info())
+                .body(Body::empty())
+                .expect("stale dashboard request"),
+        )
+        .await
+        .expect("stale dashboard response");
+    assert!(
+        response.status().is_redirection(),
+        "stale session should redirect, got {}",
+        response.status()
+    );
     assert_eq!(location(&response).as_deref(), Some("/kraken_ui/login"));
 }

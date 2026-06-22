@@ -514,6 +514,7 @@ mod tests {
             waf_rule_certificate_path: None,
             log_directory: directory.path().to_path_buf(),
             session_timeout_minutes: 30,
+            admin_session_time_limit_seconds: 60 * 60,
             trusted_proxy_ips: Vec::new(),
         };
         let application = AppFactory::new(config)
@@ -567,6 +568,7 @@ mod tests {
             waf_rule_certificate_path: None,
             log_directory: directory.path().to_path_buf(),
             session_timeout_minutes: 30,
+            admin_session_time_limit_seconds: 60 * 60,
             trusted_proxy_ips: Vec::new(),
         };
         let application = AppFactory::new(config)

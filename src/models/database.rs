@@ -65,6 +65,9 @@ async fn initialize_schema(database: &DatabaseConnection) -> anyhow::Result<()> 
                     CHECK (type IN ('admin', 'operator', 'auditor')),
                 encrypted_password_hash VARCHAR(1024) NOT NULL,
                 mfa_enabled INTEGER NOT NULL DEFAULT 0,
+                authz_version INTEGER NOT NULL DEFAULT 0,
+                authenticated_at TIMESTAMP,
+                reauthenticated_at TIMESTAMP,
                 created_at TIMESTAMP NOT NULL,
                 updated_at TIMESTAMP NOT NULL
             )
@@ -79,6 +82,27 @@ async fn initialize_schema(database: &DatabaseConnection) -> anyhow::Result<()> 
         .execute(Statement::from_string(
             DbBackend::Sqlite,
             "ALTER TABLE operators ADD COLUMN mfa_enabled INTEGER NOT NULL DEFAULT 0",
+        ))
+        .await;
+    // Bring forward databases created before authorization epochs existed. This
+    // epoch is copied into sessions and compared on each protected request.
+    let _ = database
+        .execute(Statement::from_string(
+            DbBackend::Sqlite,
+            "ALTER TABLE operators ADD COLUMN authz_version INTEGER NOT NULL DEFAULT 0",
+        ))
+        .await;
+    // Audit columns for successful full authentication and step-up events.
+    let _ = database
+        .execute(Statement::from_string(
+            DbBackend::Sqlite,
+            "ALTER TABLE operators ADD COLUMN authenticated_at TIMESTAMP",
+        ))
+        .await;
+    let _ = database
+        .execute(Statement::from_string(
+            DbBackend::Sqlite,
+            "ALTER TABLE operators ADD COLUMN reauthenticated_at TIMESTAMP",
         ))
         .await;
 

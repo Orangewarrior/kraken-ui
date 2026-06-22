@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, ConnectionTrait, DatabaseConnection,
-    DbBackend, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter, Set, Statement, Value,
+    DbBackend, EntityTrait, PaginatorTrait, QueryFilter, Set, Statement, TransactionTrait, Value,
 };
 use time::OffsetDateTime;
 
@@ -49,6 +49,7 @@ pub struct MfaStatus {
 }
 
 /// The result of confirming a pending enrollment.
+#[derive(Debug)]
 pub enum ConfirmOutcome {
     /// There is no pending enrollment to confirm (or it was already confirmed).
     NoPendingEnrollment,
@@ -85,19 +86,6 @@ impl OperatorMfaRepository {
             .totp_row(id_user)
             .await?
             .filter(|row| row.confirmed != 0))
-    }
-
-    /// Returns the decrypted base32 secret only when two-factor is confirmed for
-    /// the operator; `None` for a pending or absent enrollment.
-    async fn confirmed_secret(&self, id_user: i32) -> anyhow::Result<Option<String>> {
-        match self.confirmed_totp_row(id_user).await? {
-            Some(row) => Ok(Some(self.password_crypto.decrypt_secret(
-                id_user,
-                TOTP_DOMAIN,
-                &row.encrypted_secret,
-            )?)),
-            None => Ok(None),
-        }
     }
 
     pub async fn status(&self, id_user: i32) -> anyhow::Result<MfaStatus> {
@@ -149,11 +137,19 @@ impl OperatorMfaRepository {
             self.password_crypto
                 .encrypt_secret(id_user, TOTP_DOMAIN, &secret_base32)?;
 
+        let transaction = self
+            .database
+            .begin()
+            .await
+            .context("failed to start TOTP enrollment transaction")?;
+
         // `id_user` is unique, so any previous (pending or stale) enrollment must
-        // go before the new one is inserted.
+        // go before the new one is inserted. Keep the delete and insert in one
+        // transaction so a storage failure cannot leave the account without either
+        // the old or the new enrollment row.
         totp::Entity::delete_many()
             .filter(totp::Column::IdUser.eq(id_user))
-            .exec(&self.database)
+            .exec(&transaction)
             .await
             .context("failed to clear the previous TOTP enrollment")?;
         totp::ActiveModel {
@@ -165,9 +161,13 @@ impl OperatorMfaRepository {
             confirmed_at: Set(None),
             last_used_step: NotSet,
         }
-        .insert(&self.database)
+        .insert(&transaction)
         .await
         .context("failed to store the pending TOTP enrollment")?;
+        transaction
+            .commit()
+            .await
+            .context("failed to commit TOTP enrollment")?;
 
         Ok(MfaEnrollment {
             secret_base32,
@@ -218,35 +218,70 @@ impl OperatorMfaRepository {
             return Ok(ConfirmOutcome::InvalidCode);
         };
 
-        let mut active = row.into_active_model();
-        active.confirmed = Set(1);
-        active.confirmed_at = Set(Some(current_timestamp()));
-        // Burn the confirming code's step as well, so it cannot be replayed at the
-        // login challenge during the few seconds it remains valid.
-        active.last_used_step = Set(step as i64);
-        active
-            .update(&self.database)
+        let transaction = self
+            .database
+            .begin()
+            .await
+            .context("failed to start TOTP confirmation transaction")?;
+        let statement = Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "UPDATE operator_mfa_totp \
+             SET confirmed = 1, confirmed_at = ?, last_used_step = ? \
+             WHERE id_totp = ? AND id_user = ? AND confirmed = 0",
+            [
+                Value::from(current_timestamp()),
+                Value::from(step as i64),
+                Value::from(row.id_totp),
+                Value::from(id_user),
+            ],
+        );
+        let result = transaction
+            .execute(statement)
             .await
             .context("failed to confirm the TOTP enrollment")?;
-        self.set_operator_flag(id_user, true).await?;
-        let recovery_codes = self.replace_recovery_codes(id_user).await?;
+        if result.rows_affected() != 1 {
+            transaction
+                .rollback()
+                .await
+                .context("failed to roll back stale TOTP confirmation")?;
+            return Ok(ConfirmOutcome::NoPendingEnrollment);
+        }
+        self.set_operator_flag_in(&transaction, id_user, true)
+            .await?;
+        let recovery_codes = self
+            .replace_recovery_codes_in(&transaction, id_user)
+            .await?;
+        transaction
+            .commit()
+            .await
+            .context("failed to commit TOTP confirmation")?;
         Ok(ConfirmOutcome::Confirmed { recovery_codes })
     }
 
     /// Disables two-factor for an operator, removing the secret and every recovery
     /// code and clearing the displayed flag.
     pub async fn disable(&self, id_user: i32) -> anyhow::Result<()> {
+        let transaction = self
+            .database
+            .begin()
+            .await
+            .context("failed to start MFA disable transaction")?;
         totp::Entity::delete_many()
             .filter(totp::Column::IdUser.eq(id_user))
-            .exec(&self.database)
+            .exec(&transaction)
             .await
             .context("failed to remove the TOTP secret")?;
         recovery::Entity::delete_many()
             .filter(recovery::Column::IdUser.eq(id_user))
-            .exec(&self.database)
+            .exec(&transaction)
             .await
             .context("failed to remove recovery codes")?;
-        self.set_operator_flag(id_user, false).await?;
+        self.set_operator_flag_in(&transaction, id_user, false)
+            .await?;
+        transaction
+            .commit()
+            .await
+            .context("failed to commit MFA disable")?;
         Ok(())
     }
 
@@ -256,10 +291,35 @@ impl OperatorMfaRepository {
         &self,
         id_user: i32,
     ) -> anyhow::Result<Option<Vec<String>>> {
-        if self.confirmed_secret(id_user).await?.is_none() {
+        let transaction = self
+            .database
+            .begin()
+            .await
+            .context("failed to start recovery-code regeneration transaction")?;
+        let enabled = totp::Entity::find()
+            .filter(totp::Column::IdUser.eq(id_user))
+            .filter(totp::Column::Confirmed.eq(1))
+            .one(&transaction)
+            .await
+            .context("failed to query confirmed TOTP state")?
+            .is_some();
+        if !enabled {
+            transaction
+                .rollback()
+                .await
+                .context("failed to roll back skipped recovery-code regeneration")?;
             return Ok(None);
         }
-        Ok(Some(self.replace_recovery_codes(id_user).await?))
+        let recovery_codes = self
+            .replace_recovery_codes_in(&transaction, id_user)
+            .await?;
+        self.bump_operator_authz_version_in(&transaction, id_user)
+            .await?;
+        transaction
+            .commit()
+            .await
+            .context("failed to commit recovery-code regeneration")?;
+        Ok(Some(recovery_codes))
     }
 
     /// Verifies a code presented at the login challenge: first as a live TOTP code,
@@ -276,22 +336,53 @@ impl OperatorMfaRepository {
                 if (step as i64) <= row.last_used_step {
                     return Ok(false);
                 }
-                let mut active = row.into_active_model();
-                active.last_used_step = Set(step as i64);
-                active
-                    .update(&self.database)
-                    .await
-                    .context("failed to record the used TOTP step")?;
-                return Ok(true);
+                return self.consume_totp_step(row.id_totp, id_user, step).await;
             }
         }
         self.consume_recovery_code(id_user, code).await
     }
 
-    async fn replace_recovery_codes(&self, id_user: i32) -> anyhow::Result<Vec<String>> {
+    async fn consume_totp_step(
+        &self,
+        id_totp: i32,
+        id_user: i32,
+        step: u64,
+    ) -> anyhow::Result<bool> {
+        let step = step as i64;
+        let statement = Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "UPDATE operator_mfa_totp \
+             SET last_used_step = ? \
+             WHERE id_totp = ? \
+               AND id_user = ? \
+               AND confirmed = 1 \
+               AND last_used_step < ?",
+            [
+                Value::from(step),
+                Value::from(id_totp),
+                Value::from(id_user),
+                Value::from(step),
+            ],
+        );
+        let result = self
+            .database
+            .execute(statement)
+            .await
+            .context("failed to record the used TOTP step")?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    async fn replace_recovery_codes_in<C>(
+        &self,
+        executor: &C,
+        id_user: i32,
+    ) -> anyhow::Result<Vec<String>>
+    where
+        C: ConnectionTrait,
+    {
         recovery::Entity::delete_many()
             .filter(recovery::Column::IdUser.eq(id_user))
-            .exec(&self.database)
+            .exec(executor)
             .await
             .context("failed to clear previous recovery codes")?;
         let mut plaintext = Vec::with_capacity(RECOVERY_CODE_COUNT);
@@ -308,7 +399,7 @@ impl OperatorMfaRepository {
                 created_at: Set(current_timestamp()),
                 used_at: Set(None),
             }
-            .insert(&self.database)
+            .insert(executor)
             .await
             .context("failed to store a recovery code")?;
             plaintext.push(code);
@@ -337,33 +428,76 @@ impl OperatorMfaRepository {
                 normalize_recovery(&stored).as_bytes(),
                 candidate.as_bytes(),
             ) {
-                let mut active = row.into_active_model();
-                active.used = Set(1);
-                active.used_at = Set(Some(current_timestamp()));
-                active
-                    .update(&self.database)
-                    .await
-                    .context("failed to burn the used recovery code")?;
-                return Ok(true);
+                return self.consume_recovery_code_row(id_user, row.id_code).await;
             }
         }
         Ok(false)
     }
 
-    async fn set_operator_flag(&self, id_user: i32, enabled: bool) -> anyhow::Result<()> {
+    async fn consume_recovery_code_row(&self, id_user: i32, id_code: i32) -> anyhow::Result<bool> {
         let statement = Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "UPDATE operators SET mfa_enabled = ?, updated_at = ? WHERE id_user = ?",
+            "UPDATE operator_mfa_recovery_codes \
+             SET used = 1, used_at = ? \
+             WHERE id_code = ? AND id_user = ? AND used = 0",
+            [
+                Value::from(current_timestamp()),
+                Value::from(id_code),
+                Value::from(id_user),
+            ],
+        );
+        let result = self
+            .database
+            .execute(statement)
+            .await
+            .context("failed to burn the used recovery code")?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    async fn set_operator_flag_in<C>(
+        &self,
+        executor: &C,
+        id_user: i32,
+        enabled: bool,
+    ) -> anyhow::Result<()>
+    where
+        C: ConnectionTrait,
+    {
+        let statement = Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "UPDATE operators \
+             SET mfa_enabled = ?, updated_at = ?, authz_version = authz_version + 1 \
+             WHERE id_user = ?",
             [
                 Value::from(i32::from(enabled)),
                 Value::from(current_timestamp()),
                 Value::from(id_user),
             ],
         );
-        self.database
+        executor
             .execute(statement)
             .await
             .context("failed to update the operator two-factor flag")?;
+        Ok(())
+    }
+
+    async fn bump_operator_authz_version_in<C>(
+        &self,
+        executor: &C,
+        id_user: i32,
+    ) -> anyhow::Result<()>
+    where
+        C: ConnectionTrait,
+    {
+        let statement = Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "UPDATE operators SET updated_at = ?, authz_version = authz_version + 1 WHERE id_user = ?",
+            [Value::from(current_timestamp()), Value::from(id_user)],
+        );
+        executor
+            .execute(statement)
+            .await
+            .context("failed to bump the operator authorization epoch")?;
         Ok(())
     }
 }
@@ -425,11 +559,17 @@ fn normalize_recovery(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
 
     use sea_orm::{ConnectionTrait, DbBackend, Statement};
+    use tokio::sync::Barrier;
 
-    use super::{ConfirmOutcome, OperatorMfaRepository, RECOVERY_CODE_COUNT, TOTP_PERIOD};
+    use super::{
+        ConfirmOutcome, OperatorMfaRepository, RECOVERY_CODE_COUNT, RECOVERY_DOMAIN, TOTP_PERIOD,
+    };
     use crate::{
         models::{
             database,
@@ -480,15 +620,76 @@ mod tests {
         }
     }
 
+    struct FailingRecoveryCrypto {
+        fail_recovery_encrypt: AtomicBool,
+    }
+
+    impl FailingRecoveryCrypto {
+        fn new() -> Self {
+            Self {
+                fail_recovery_encrypt: AtomicBool::new(false),
+            }
+        }
+    }
+
+    impl PasswordCryptoService for FailingRecoveryCrypto {
+        fn encrypt_password(&self, user_id: i32, password: &str) -> anyhow::Result<String> {
+            Ok(format!("encrypted:{user_id}:{}", password.len()))
+        }
+
+        fn verify_password(
+            &self,
+            _user_id: i32,
+            _encrypted_record: &str,
+            _password: &str,
+        ) -> anyhow::Result<PasswordVerification> {
+            Ok(PasswordVerification {
+                valid: true,
+                replacement_record: None,
+            })
+        }
+
+        fn encrypt_secret(
+            &self,
+            user_id: i32,
+            domain: &str,
+            plaintext: &str,
+        ) -> anyhow::Result<String> {
+            if domain == RECOVERY_DOMAIN && self.fail_recovery_encrypt.load(Ordering::SeqCst) {
+                anyhow::bail!("forced recovery-code encryption failure");
+            }
+            Ok(format!("sec:{user_id}:{domain}:{plaintext}"))
+        }
+
+        fn decrypt_secret(
+            &self,
+            user_id: i32,
+            domain: &str,
+            ciphertext: &str,
+        ) -> anyhow::Result<String> {
+            let prefix = format!("sec:{user_id}:{domain}:");
+            Ok(ciphertext
+                .strip_prefix(&prefix)
+                .unwrap_or(ciphertext)
+                .to_owned())
+        }
+    }
+
     /// Connects a database inside a securely named temporary directory and seeds
     /// one admin operator. The returned `TempDir` guard must outlive the database;
     /// it removes the directory (and any SQLite WAL sidecars) on drop.
     async fn fixture() -> (sea_orm::DatabaseConnection, tempfile::TempDir, i32) {
+        fixture_with_crypto(Arc::new(TestCrypto)).await
+    }
+
+    async fn fixture_with_crypto(
+        crypto: Arc<dyn PasswordCryptoService>,
+    ) -> (sea_orm::DatabaseConnection, tempfile::TempDir, i32) {
         let directory = tempfile::tempdir().expect("temporary directory");
         let database = database::connect(&directory.path().join("kraken-ui-mfa.sqlite"))
             .await
             .unwrap_or_else(|error| panic!("test database must connect: {error}"));
-        let operators = OperatorRepository::new(database.clone(), Arc::new(TestCrypto));
+        let operators = OperatorRepository::new(database.clone(), crypto);
         let created = operators
             .create(NewOperator {
                 username: "admin",
@@ -524,6 +725,20 @@ mod tests {
             .unwrap_or_else(|| panic!("operator row must exist"));
         row.try_get::<i32>("", "mfa_enabled")
             .unwrap_or_else(|error| panic!("flag must read: {error}"))
+    }
+
+    async fn totp_confirmed(database: &sea_orm::DatabaseConnection, id_user: i32) -> i32 {
+        let row = database
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "SELECT confirmed FROM operator_mfa_totp WHERE id_user = ?",
+                [id_user.into()],
+            ))
+            .await
+            .unwrap_or_else(|error| panic!("TOTP query must run: {error}"))
+            .unwrap_or_else(|| panic!("TOTP row must exist"));
+        row.try_get::<i32>("", "confirmed")
+            .unwrap_or_else(|error| panic!("confirmed flag must read: {error}"))
     }
 
     #[tokio::test]
@@ -599,6 +814,119 @@ mod tests {
             status.remaining_recovery_codes,
             (RECOVERY_CODE_COUNT - 2) as u64
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_totp_verification_consumes_a_step_once() {
+        let (database, _directory, id_user) = fixture().await;
+        let mfa = OperatorMfaRepository::new(database.clone(), Arc::new(TestCrypto));
+        let enrollment = mfa.begin_enrollment(id_user, "admin").await.unwrap();
+        let now = time::OffsetDateTime::now_utc().unix_timestamp() as u64;
+        let ConfirmOutcome::Confirmed { .. } = mfa
+            .confirm(id_user, &code_at(&enrollment.secret_base32, now))
+            .await
+            .unwrap()
+        else {
+            panic!("enrollment must confirm");
+        };
+        let fresh = code_at(&enrollment.secret_base32, now + TOTP_PERIOD);
+        let barrier = Arc::new(Barrier::new(2));
+
+        let first = {
+            let mfa = mfa.clone();
+            let barrier = barrier.clone();
+            let fresh = fresh.clone();
+            async move {
+                barrier.wait().await;
+                mfa.verify_login_code(id_user, &fresh).await.unwrap()
+            }
+        };
+        let second = {
+            let mfa = mfa.clone();
+            let barrier = barrier.clone();
+            let fresh = fresh.clone();
+            async move {
+                barrier.wait().await;
+                mfa.verify_login_code(id_user, &fresh).await.unwrap()
+            }
+        };
+
+        let (first, second) = tokio::join!(first, second);
+        assert_eq!(
+            [first, second]
+                .into_iter()
+                .filter(|accepted| *accepted)
+                .count(),
+            1
+        );
+        assert!(!mfa.verify_login_code(id_user, &fresh).await.unwrap());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_recovery_code_verification_consumes_a_code_once() {
+        let (database, _directory, id_user) = fixture().await;
+        let mfa = OperatorMfaRepository::new(database.clone(), Arc::new(TestCrypto));
+        let enrollment = mfa.begin_enrollment(id_user, "admin").await.unwrap();
+        let ConfirmOutcome::Confirmed { recovery_codes } = mfa
+            .confirm(id_user, &current_code(&enrollment.secret_base32))
+            .await
+            .unwrap()
+        else {
+            panic!("enrollment must confirm");
+        };
+        let recovery = recovery_codes[0].clone();
+        let barrier = Arc::new(Barrier::new(2));
+
+        let first = {
+            let mfa = mfa.clone();
+            let barrier = barrier.clone();
+            let recovery = recovery.clone();
+            async move {
+                barrier.wait().await;
+                mfa.verify_login_code(id_user, &recovery).await.unwrap()
+            }
+        };
+        let second = {
+            let mfa = mfa.clone();
+            let barrier = barrier.clone();
+            let recovery = recovery.clone();
+            async move {
+                barrier.wait().await;
+                mfa.verify_login_code(id_user, &recovery).await.unwrap()
+            }
+        };
+
+        let (first, second) = tokio::join!(first, second);
+        assert_eq!(
+            [first, second]
+                .into_iter()
+                .filter(|accepted| *accepted)
+                .count(),
+            1
+        );
+        assert!(!mfa.verify_login_code(id_user, &recovery).await.unwrap());
+        assert_eq!(
+            mfa.status(id_user).await.unwrap().remaining_recovery_codes,
+            (RECOVERY_CODE_COUNT - 1) as u64
+        );
+    }
+
+    #[tokio::test]
+    async fn confirm_rolls_back_when_recovery_code_generation_fails() {
+        let crypto = Arc::new(FailingRecoveryCrypto::new());
+        let (database, _directory, id_user) = fixture_with_crypto(crypto.clone()).await;
+        let mfa = OperatorMfaRepository::new(database.clone(), crypto.clone());
+        let enrollment = mfa.begin_enrollment(id_user, "admin").await.unwrap();
+        crypto.fail_recovery_encrypt.store(true, Ordering::SeqCst);
+
+        let error = mfa
+            .confirm(id_user, &current_code(&enrollment.secret_base32))
+            .await
+            .expect_err("forced recovery-code encryption failure must abort confirmation");
+        assert!(error.to_string().contains("forced recovery-code"));
+        assert_eq!(operator_flag(&database, id_user).await, 0);
+        assert_eq!(totp_confirmed(&database, id_user).await, 0);
+        assert!(!mfa.status(id_user).await.unwrap().enabled);
     }
 
     #[tokio::test]

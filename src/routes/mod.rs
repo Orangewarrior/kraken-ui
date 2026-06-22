@@ -43,7 +43,7 @@ pub fn create(state: AppState) -> Router {
             post(update::start),
         )
         .route("/kraken_ui/auth/api/update_kraken_ui", get(update::status))
-        .route_layer(middleware::from_fn(require_admin));
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_admin));
 
     // Operator-grade routes: rule management. Open to administrators and operators
     // but not auditors, whose remit is read-only.
@@ -75,7 +75,10 @@ pub fn create(state: AppState) -> Router {
             "/kraken_ui/auth/rule_management/regex/update",
             post(rule_management::regex_update),
         )
-        .route_layer(middleware::from_fn(require_operator));
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_operator,
+        ));
 
     // The read-only console surface shared by administrators, operators and
     // auditors: dashboard, attacks monitor (table and single-attack detail) and
@@ -107,7 +110,10 @@ pub fn create(state: AppState) -> Router {
         .route("/kraken_ui/auth/mfa_disable", post(mfa::mfa_disable))
         .route("/kraken_ui/auth/mfa_regenerate", post(mfa::mfa_regenerate))
         .route("/kraken_ui/auth/logout", post(auth::logout))
-        .route_layer(middleware::from_fn(require_console_viewer));
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_console_viewer,
+        ));
 
     Router::new()
         .route("/", get(|| async { Redirect::to("/kraken_ui/login") }))

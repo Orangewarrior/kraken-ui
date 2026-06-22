@@ -12,6 +12,9 @@ waf-cert-ca: "../KrakenWAF/certs/cert.pem"
 waf-rule-endpoint: "https://127.0.0.1:4342"
 log-dir: log
 session-timeout-minutes: 30
+# Absolute lifetime for authenticated console sessions. Simple human notation
+# supports s/m/h, for example 30m, 1h or 1h30m. Values above 12h are refused.
+admin-session-time-limmit: 1h
 # Optional: exact reverse-proxy peer IPs allowed to supply Forwarded,
 # X-Forwarded-For or X-Real-IP. Keep empty for direct TLS exposure.
 trusted-proxy-ips: []

@@ -138,6 +138,7 @@ pub async fn mfa_confirm(
     use crate::models::operator_mfa_repository::ConfirmOutcome;
     match mfa.confirm(operator.id_user, &code).await? {
         ConfirmOutcome::Confirmed { recovery_codes } => {
+            let operator = refresh_current_session(&state, &session, operator.id_user).await?;
             audit_mfa_event("enable", operator.id_user, &operator.username);
             render_recovery(
                 token,
@@ -210,6 +211,7 @@ pub async fn mfa_disable(
         }
     };
     mfa_repository(&state).disable(operator.id_user).await?;
+    let operator = refresh_current_session(&state, &session, operator.id_user).await?;
     audit_mfa_event("disable", operator.id_user, &operator.username);
     render_overview(
         &state,
@@ -248,6 +250,7 @@ pub async fn mfa_regenerate(
         .await?
     {
         Some(recovery_codes) => {
+            let operator = refresh_current_session(&state, &session, operator.id_user).await?;
             audit_mfa_event("regenerate_recovery", operator.id_user, &operator.username);
             render_recovery(
                 token,
@@ -281,6 +284,19 @@ async fn current_operator(
             .find_by_id(id_user)
             .await?,
     )
+}
+
+async fn refresh_current_session(
+    state: &AppState,
+    session: &Session,
+    id_user: i32,
+) -> Result<Operator, AppError> {
+    let operator = OperatorRepository::new(state.database.clone(), state.password_crypto.clone())
+        .find_by_id(id_user)
+        .await?
+        .ok_or_else(|| AppError::internal(anyhow!("operator disappeared after MFA update")))?;
+    auth::refresh_authenticated_session(session, &operator).await?;
+    Ok(operator)
 }
 
 fn mfa_repository(state: &AppState) -> OperatorMfaRepository {

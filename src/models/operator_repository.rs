@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, Condition, DatabaseConnection, EntityTrait,
-    IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
+    ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, Condition, ConnectionTrait,
+    DatabaseConnection, DbBackend, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
+    QueryOrder, QuerySelect, Set, Statement, TransactionTrait, Value,
 };
 use zeroize::Zeroizing;
 
@@ -100,6 +101,9 @@ impl OperatorRepository {
             operator_type: Set(input.operator_type.to_owned()),
             encrypted_password_hash: Set("transaction-pending".to_owned()),
             mfa_enabled: NotSet,
+            authz_version: NotSet,
+            authenticated_at: NotSet,
+            reauthenticated_at: NotSet,
             created_at: Set(timestamp.clone()),
             updated_at: Set(timestamp),
         }
@@ -132,23 +136,100 @@ impl OperatorRepository {
         input: UpdateOperator<'_>,
     ) -> anyhow::Result<operator::Model> {
         let user_id = existing.id_user;
-        let mut active_operator = existing.into_active_model();
-        active_operator.username = Set(input.username.to_owned());
-        active_operator.email = Set(input.email.to_owned());
-        active_operator.operator_type = Set(input.operator_type.to_owned());
-        active_operator.updated_at = Set(current_timestamp());
-        if let Some(password) = input.password {
-            active_operator.encrypted_password_hash = Set(spawn_encrypt(
-                self.password_crypto.clone(),
-                user_id,
-                Zeroizing::new(password.to_owned()),
+        let encrypted_password_hash = if let Some(password) = input.password {
+            Some(
+                spawn_encrypt(
+                    self.password_crypto.clone(),
+                    user_id,
+                    Zeroizing::new(password.to_owned()),
+                )
+                .await?,
             )
-            .await?);
-        }
-        active_operator
-            .update(&self.database)
+        } else {
+            None
+        };
+        let transaction = self
+            .database
+            .begin()
             .await
-            .context("failed to update operator")
+            .context("failed to start operator update transaction")?;
+        if let Some(encrypted_password_hash) = encrypted_password_hash {
+            let statement = Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE operators \
+                 SET username = ?, email = ?, type = ?, encrypted_password_hash = ?, \
+                     updated_at = ?, authz_version = authz_version + 1 \
+                 WHERE id_user = ?",
+                [
+                    Value::from(input.username.to_owned()),
+                    Value::from(input.email.to_owned()),
+                    Value::from(input.operator_type.to_owned()),
+                    Value::from(encrypted_password_hash),
+                    Value::from(current_timestamp()),
+                    Value::from(user_id),
+                ],
+            );
+            transaction
+                .execute(statement)
+                .await
+                .context("failed to update operator")?;
+        } else {
+            let statement = Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE operators \
+                 SET username = ?, email = ?, type = ?, \
+                     updated_at = ?, authz_version = authz_version + 1 \
+                 WHERE id_user = ?",
+                [
+                    Value::from(input.username.to_owned()),
+                    Value::from(input.email.to_owned()),
+                    Value::from(input.operator_type.to_owned()),
+                    Value::from(current_timestamp()),
+                    Value::from(user_id),
+                ],
+            );
+            transaction
+                .execute(statement)
+                .await
+                .context("failed to update operator")?;
+        }
+        let operator = operator::Entity::find_by_id(user_id)
+            .one(&transaction)
+            .await
+            .context("failed to load updated operator")?
+            .context("updated operator disappeared before commit")?;
+        transaction
+            .commit()
+            .await
+            .context("failed to commit operator update")?;
+        Ok(operator)
+    }
+
+    pub async fn record_authenticated(&self, id_user: i32) -> anyhow::Result<()> {
+        self.record_authentication_timestamp(id_user, "authenticated_at")
+            .await
+    }
+
+    pub async fn record_reauthenticated(&self, id_user: i32) -> anyhow::Result<()> {
+        self.record_authentication_timestamp(id_user, "reauthenticated_at")
+            .await
+    }
+
+    async fn record_authentication_timestamp(
+        &self,
+        id_user: i32,
+        column: &'static str,
+    ) -> anyhow::Result<()> {
+        let statement = Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            format!("UPDATE operators SET {column} = ? WHERE id_user = ?"),
+            [Value::from(current_timestamp()), Value::from(id_user)],
+        );
+        self.database
+            .execute(statement)
+            .await
+            .context("failed to record operator authentication timestamp")?;
+        Ok(())
     }
 
     pub async fn update_encrypted_password(
@@ -175,18 +256,42 @@ impl OperatorRepository {
         password: &str,
     ) -> anyhow::Result<operator::Model> {
         let user_id = existing.id_user;
-        let mut active_operator = existing.into_active_model();
-        active_operator.encrypted_password_hash = Set(spawn_encrypt(
+        let encrypted_password_hash = spawn_encrypt(
             self.password_crypto.clone(),
             user_id,
             Zeroizing::new(password.to_owned()),
         )
-        .await?);
-        active_operator.updated_at = Set(current_timestamp());
-        active_operator
-            .update(&self.database)
+        .await?;
+        let transaction = self
+            .database
+            .begin()
             .await
-            .context("failed to update operator password")
+            .context("failed to start password update transaction")?;
+        let statement = Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "UPDATE operators \
+             SET encrypted_password_hash = ?, updated_at = ?, authz_version = authz_version + 1 \
+             WHERE id_user = ?",
+            [
+                Value::from(encrypted_password_hash),
+                Value::from(current_timestamp()),
+                Value::from(user_id),
+            ],
+        );
+        transaction
+            .execute(statement)
+            .await
+            .context("failed to update operator password")?;
+        let operator = operator::Entity::find_by_id(user_id)
+            .one(&transaction)
+            .await
+            .context("failed to load updated operator")?
+            .context("updated operator disappeared before commit")?;
+        transaction
+            .commit()
+            .await
+            .context("failed to commit password update")?;
+        Ok(operator)
     }
 
     pub async fn delete_by_id(&self, id_user: i32) -> anyhow::Result<u64> {
@@ -312,6 +417,25 @@ mod tests {
             .unwrap_or_else(|error| panic!("operator must be created: {error}"));
         assert_eq!(created.id_user, 1);
         assert_eq!(created.encrypted_password_hash, "encrypted:1:17");
+        assert_eq!(created.authz_version, 0);
+        let created_authz_version = created.authz_version;
+
+        repository
+            .record_authenticated(created.id_user)
+            .await
+            .unwrap_or_else(|error| panic!("authenticated_at must be recorded: {error}"));
+        repository
+            .record_reauthenticated(created.id_user)
+            .await
+            .unwrap_or_else(|error| panic!("reauthenticated_at must be recorded: {error}"));
+        let audited = repository
+            .find_by_id(created.id_user)
+            .await
+            .unwrap_or_else(|error| panic!("operator must load: {error}"))
+            .expect("operator exists");
+        assert!(audited.authenticated_at.is_some());
+        assert!(audited.reauthenticated_at.is_some());
+        assert_eq!(audited.authz_version, created_authz_version);
 
         let updated = repository
             .update(
@@ -326,6 +450,14 @@ mod tests {
             .await
             .unwrap_or_else(|error| panic!("operator must be updated: {error}"));
         assert_eq!(updated.username, "admin2");
+        assert_eq!(updated.authz_version, created_authz_version + 1);
+        let updated_authz_version = updated.authz_version;
+
+        let updated = repository
+            .update_password(updated, "Another&Random#Pass9")
+            .await
+            .unwrap_or_else(|error| panic!("operator password must be updated: {error}"));
+        assert_eq!(updated.authz_version, updated_authz_version + 1);
 
         let page = repository
             .page(0, 10, "admin2")

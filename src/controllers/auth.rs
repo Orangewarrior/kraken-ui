@@ -31,6 +31,12 @@ use crate::{
 const AUTHENTICATED_USER_ID: &str = USER_ID_FIELD;
 const AUTHENTICATED_USERNAME: &str = "authenticated_username";
 const AUTHENTICATED_OPERATOR_TYPE: &str = "authenticated_operator_type";
+const AUTHENTICATED_AUTHZ_VERSION: &str = "authenticated_authz_version";
+const AUTHENTICATED_AT: &str = "authenticated_at";
+const REAUTHENTICATED_AT: &str = "reauthenticated_at";
+const SESSION_ROTATED_AT: &str = "session_rotated_at";
+const SESSION_ROTATION_INTERVAL_SECONDS: i64 = 15 * 60;
+pub const STEP_UP_FRESHNESS_SECONDS: i64 = 5 * 60;
 // Set when an operator has passed the password check but still owes a second
 // factor. It grants nothing on its own: the route guards only ever read
 // `AUTHENTICATED_OPERATOR_TYPE`, which stays unset until the code is verified.
@@ -59,11 +65,14 @@ pub struct MfaCodeForm {
     csrf_token: String,
 }
 
-pub async fn login_page(token: CsrfToken, session: Session) -> Result<Response, AppError> {
-    if authenticated_operator_type(&session)
+pub async fn login_page(
+    State(state): State<AppState>,
+    token: CsrfToken,
+    session: Session,
+) -> Result<Response, AppError> {
+    if authorized_role(&state, &session)
         .await?
-        .as_deref()
-        .is_some_and(is_console_role)
+        .is_some_and(OperatorRole::can_use_console)
     {
         return Ok(Redirect::to("/kraken_ui/auth/admin_panel").into_response());
     }
@@ -217,6 +226,7 @@ pub async fn login_submit(
         return Ok(Redirect::to("/kraken_ui/auth/mfa_challenge").into_response());
     }
 
+    repository.record_authenticated(operator.id_user).await?;
     establish_session(&session, &operator).await?;
     audit_login(&client_ip, &username, "success");
     Ok(Redirect::to("/kraken_ui/auth/admin_panel").into_response())
@@ -297,6 +307,7 @@ pub async fn mfa_verify(
         .rate_limiting
         .login_throttle
         .record_success(&throttle_key);
+    repository.record_authenticated(operator.id_user).await?;
     clear_mfa_pending(&session).await?;
     establish_session(&session, &operator).await?;
     audit_login(&client_ip, &operator.username, "success");
@@ -309,10 +320,29 @@ async fn establish_session(
     session: &Session,
     operator: &crate::models::operator::Model,
 ) -> Result<(), AppError> {
+    let now = OffsetDateTime::now_utc().unix_timestamp();
     session
         .cycle_id()
         .await
         .map_err(|error| AppError::internal(anyhow!("failed to rotate session id: {error}")))?;
+    sync_session_identity(session, operator).await?;
+    set_session_timestamp(session, AUTHENTICATED_AT, now).await?;
+    set_session_timestamp(session, REAUTHENTICATED_AT, now).await?;
+    set_session_timestamp(session, SESSION_ROTATED_AT, now).await?;
+    Ok(())
+}
+
+pub async fn refresh_authenticated_session(
+    session: &Session,
+    operator: &crate::models::operator::Model,
+) -> Result<(), AppError> {
+    sync_session_identity(session, operator).await
+}
+
+async fn sync_session_identity(
+    session: &Session,
+    operator: &crate::models::operator::Model,
+) -> Result<(), AppError> {
     session
         .insert(AUTHENTICATED_USER_ID, operator.id_user)
         .await
@@ -333,7 +363,41 @@ async fn establish_session(
         )
         .await
         .map_err(|error| AppError::internal(anyhow!("failed to persist operator type: {error}")))?;
+    session
+        .insert(AUTHENTICATED_AUTHZ_VERSION, operator.authz_version)
+        .await
+        .map_err(|error| {
+            AppError::internal(anyhow!("failed to persist authorization version: {error}"))
+        })?;
     Ok(())
+}
+
+pub async fn mark_reauthenticated(session: &Session) -> Result<i64, AppError> {
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    set_session_timestamp(session, REAUTHENTICATED_AT, now).await?;
+    Ok(now)
+}
+
+pub async fn reauthenticated_within(
+    session: &Session,
+    max_age_seconds: i64,
+) -> Result<bool, AppError> {
+    let Some(reauthenticated_at) = session_timestamp(session, REAUTHENTICATED_AT).await? else {
+        return Ok(false);
+    };
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    Ok(now.saturating_sub(reauthenticated_at) <= max_age_seconds)
+}
+
+async fn set_session_timestamp(
+    session: &Session,
+    key: &'static str,
+    timestamp: i64,
+) -> Result<(), AppError> {
+    session
+        .insert(key, timestamp)
+        .await
+        .map_err(|error| AppError::internal(anyhow!("failed to persist session time: {error}")))
 }
 
 async fn mfa_pending_user_id(session: &Session) -> Result<Option<i32>, AppError> {
@@ -421,11 +485,86 @@ pub async fn authenticated_operator_type(session: &Session) -> Result<Option<Str
         })
 }
 
+pub async fn authenticated_authz_version(session: &Session) -> Result<Option<i64>, AppError> {
+    session
+        .get::<i64>(AUTHENTICATED_AUTHZ_VERSION)
+        .await
+        .map_err(|error| {
+            AppError::internal(anyhow!(
+                "failed to read authorization version from session: {error}"
+            ))
+        })
+}
+
+async fn session_timestamp(session: &Session, key: &'static str) -> Result<Option<i64>, AppError> {
+    session.get::<i64>(key).await.map_err(|error| {
+        AppError::internal(anyhow!("failed to read session timestamp {key}: {error}"))
+    })
+}
+
 pub async fn authenticated_role(session: &Session) -> Result<Option<OperatorRole>, AppError> {
     Ok(authenticated_operator_type(session)
         .await?
         .as_deref()
         .and_then(OperatorRole::parse))
+}
+
+pub async fn authorized_role(
+    state: &AppState,
+    session: &Session,
+) -> Result<Option<OperatorRole>, AppError> {
+    let Some(id_user) = authenticated_user_id(session).await? else {
+        return Ok(None);
+    };
+    let Some(session_role) = authenticated_role(session).await? else {
+        let _ = session.flush().await;
+        return Ok(None);
+    };
+    let Some(session_authz_version) = authenticated_authz_version(session).await? else {
+        let _ = session.flush().await;
+        return Ok(None);
+    };
+    let Some(authenticated_at) = session_timestamp(session, AUTHENTICATED_AT).await? else {
+        let _ = session.flush().await;
+        return Ok(None);
+    };
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let absolute_limit =
+        i64::try_from(state.config.admin_session_time_limit_seconds).unwrap_or(i64::MAX);
+    if now.saturating_sub(authenticated_at) >= absolute_limit {
+        let _ = session.flush().await;
+        return Ok(None);
+    };
+    let repository = OperatorRepository::new(state.database.clone(), state.password_crypto.clone());
+    let Some(operator) = repository.find_by_id(id_user).await? else {
+        let _ = session.flush().await;
+        return Ok(None);
+    };
+    let Some(current_role) = operator.role() else {
+        let _ = session.flush().await;
+        return Ok(None);
+    };
+    if current_role != session_role || operator.authz_version != session_authz_version {
+        let _ = session.flush().await;
+        return Ok(None);
+    }
+    rotate_session_id_if_due(session, now).await?;
+    Ok(Some(current_role))
+}
+
+async fn rotate_session_id_if_due(session: &Session, now: i64) -> Result<(), AppError> {
+    let Some(rotated_at) = session_timestamp(session, SESSION_ROTATED_AT).await? else {
+        set_session_timestamp(session, SESSION_ROTATED_AT, now).await?;
+        return Ok(());
+    };
+    if now.saturating_sub(rotated_at) < SESSION_ROTATION_INTERVAL_SECONDS {
+        return Ok(());
+    }
+    session
+        .cycle_id()
+        .await
+        .map_err(|error| AppError::internal(anyhow!("failed to rotate session id: {error}")))?;
+    set_session_timestamp(session, SESSION_ROTATED_AT, now).await
 }
 
 /// Whether the current session belongs to an administrator. Controllers use this

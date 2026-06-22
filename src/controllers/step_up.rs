@@ -74,5 +74,13 @@ pub async fn verify(
         }
     }
 
+    repository
+        .record_reauthenticated(operator.id_user)
+        .await
+        .map_err(AppError::internal)?;
+    auth::mark_reauthenticated(session).await?;
+    if !auth::reauthenticated_within(session, auth::STEP_UP_FRESHNESS_SECONDS).await? {
+        return Ok(StepUpOutcome::Unauthorized);
+    }
     Ok(StepUpOutcome::Verified(operator))
 }
