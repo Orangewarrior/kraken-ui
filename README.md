@@ -2,7 +2,7 @@
 
 > The secure-by-default admin console for [KrakenWAF](https://github.com/Orangewarrior/KrakenWaf) — built in Rust.
 
-**Current version: 0.19.0**
+**Current version: 0.20.2**
 
 Kraken UI is a small, hardened web application for operating a KrakenWAF
 deployment: manage operators, watch blocked attacks in real time, and read live
